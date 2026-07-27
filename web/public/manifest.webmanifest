@@ -1,0 +1,18 @@
+{
+  "id": "/",
+  "name": "ASRILup — Asset Management",
+  "short_name": "ASRILup",
+  "description": "Asset Management Alam Sutera",
+  "display": "standalone",
+  "orientation": "portrait",
+  "start_url": "/",
+  "scope": "/",
+  "theme_color": "#1B90A5",
+  "background_color": "#ffffff",
+  "lang": "id-ID",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -15,6 +15,7 @@ export interface AssetRow {
   CompanyName: string
   CompanyAlias: string
   CurrentAssetUser: string
+  /** Department of the current user — legacy grid "Department" column. */
   CurrentAssetDepartment: string
   CurrentAssetLocation: string
   CurrentAssetStatus: string
@@ -102,20 +103,67 @@ export async function searchAssets(params: AssetSearchParams): Promise<AssetSear
   }
 }
 
+// The per-row ACL flags the action menu gates on. The single-asset detail SP
+// (usp_CMS_Asset_Search) does NOT return them, so the detail page can't tell
+// which actions the user may perform. We fetch them from the ManageAsset grid SP
+// (which computes them from the user's role + the asset state) and merge them in.
+const ACL_FLAG_KEYS = [
+  'isUpdate',
+  'isDelete',
+  'isDisable',
+  'isEnable',
+  'isReturn',
+  'isAssignUser',
+  'isAssignLocation',
+  'isAssignStatus',
+  'isChangeCompany',
+  'isChangeManagement',
+] as const
+
+/** The per-action ACL flags for one asset, from usp_CMS_ManageAsset_Search. */
+async function fetchAssetAclFlags(assetId: string): Promise<Partial<AssetRow>> {
+  try {
+    const env = await api.post<AssetRow>('/api/assets/search', {
+      Keyword: assetId,
+      CurrentPage: 1,
+      PageSize: 20,
+    })
+    if (env.status !== 'success') return {}
+    const r = rows(env).find((x) => x.AssetID === assetId)
+    if (!r) return {}
+    const flags: Partial<AssetRow> = {}
+    for (const k of ACL_FLAG_KEYS) {
+      if (r[k] !== undefined) flags[k] = r[k]
+    }
+    return flags
+  } catch {
+    // Non-fatal: without flags the action menu falls back to showing all actions.
+    return {}
+  }
+}
+
 /**
  * POST /api/asset/search {Keyword} → single-asset detail row (Asset controller).
  * Returns the row that exactly matches `assetId` (the SP keyword-search may
  * return several near-matches; we pick the exact AssetID, else the first).
+ *
+ * Also merges the per-action ACL flags from the ManageAsset grid SP so the detail
+ * page gates its action menu (Assign/Change/Return/…) the same way the list does.
  */
 export async function fetchAssetByID(assetId: string): Promise<AssetRow | undefined> {
-  const env = await api.post<AssetRow>('/api/asset/search', {
-    Keyword: assetId,
-    CurrentPage: 1,
-    PageSize: 20,
-  })
+  const [env, aclFlags] = await Promise.all([
+    api.post<AssetRow>('/api/asset/search', {
+      Keyword: assetId,
+      CurrentPage: 1,
+      PageSize: 20,
+    }),
+    fetchAssetAclFlags(assetId),
+  ])
   if (env.status !== 'success') throw new Error(env.message || 'Gagal memuat detail aset')
   const list = rows(env)
-  return list.find((r) => r.AssetID === assetId) ?? list[0]
+  const row = list.find((r) => r.AssetID === assetId) ?? list[0]
+  if (row) Object.assign(row, aclFlags)
+  return row
 }
 
 // --- Lookups (filter dropdowns) — GET /api/assets/lookups returns 11 rowsets. ---
@@ -143,6 +191,15 @@ export interface BrandLookup {
 export interface DepartmentLookup {
   DepartmentName: string
 }
+export interface ManagementLookup {
+  AssetManagementName: string
+  IDX_M_AssetManagement: number
+}
+export interface CompanyLookup {
+  CompanyName: string
+  CompanyAlias: string
+  IDX_M_Company: number
+}
 
 export interface AssetLookups {
   types: TypeLookup[]
@@ -151,6 +208,8 @@ export interface AssetLookups {
   users: UserLookup[]
   brands: BrandLookup[]
   departments: DepartmentLookup[]
+  managements: ManagementLookup[]
+  companies: CompanyLookup[]
 }
 
 /**
@@ -169,7 +228,9 @@ export async function fetchAssetLookups(): Promise<AssetLookups> {
     statuses: (data[3] as unknown as StatusLookup[]) ?? [],
     users: (data[4] as unknown as UserLookup[]) ?? [],
     brands: (data[6] as unknown as BrandLookup[]) ?? [],
+    managements: (data[7] as unknown as ManagementLookup[]) ?? [],
     departments: (data[8] as unknown as DepartmentLookup[]) ?? [],
+    companies: (data[10] as unknown as CompanyLookup[]) ?? [],
   }
 }
 
@@ -349,6 +410,24 @@ export async function returnAsset(payload: {
   Remarks: string
 }): Promise<string> {
   return assertStatus(await api.post<StatusEnvelope>('/api/assets/return', payload))
+}
+
+/**
+ * POST /api/assets/return — bulk return several assets from their users in one
+ * call. Mirrors the legacy Datagrid "Return User" action (ManageAsset/
+ * returnAssetUserMultiple): the SP takes a single string param, so the selected
+ * IDX_M_Asset ids are comma-joined. Throws (via assertStatus) on a business error.
+ */
+export async function returnAssets(payload: {
+  IDX_M_Asset: number[]
+  Remarks: string
+}): Promise<string> {
+  return assertStatus(
+    await api.post<StatusEnvelope>('/api/assets/return', {
+      IDX_M_Asset: payload.IDX_M_Asset.join(','),
+      Remarks: payload.Remarks,
+    }),
+  )
 }
 
 /** POST /api/assets/enable — re-enable a disabled asset. */

@@ -1,10 +1,18 @@
+import { useEffect } from 'react'
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { BottomNav } from './BottomNav'
 import { TopBar } from './TopBar'
+import { useMenuStore } from '@/store/menu'
 
 // Responsive shell: fixed sidebar on desktop (lg+), bottom nav on mobile.
 export function AppShell() {
+  // Load the user's accessible menu once, so the nav can filter itself.
+  const load = useMenuStore((s) => s.load)
+  useEffect(() => {
+    void load()
+  }, [load])
+
   return (
     <div className="min-h-[100dvh] bg-muted/30">
       <Sidebar />

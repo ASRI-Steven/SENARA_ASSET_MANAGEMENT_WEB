@@ -37,10 +37,10 @@ test.describe('dashboard (desktop)', () => {
       'Aset per Company',
       'Aset per Type',
       'Aset per Location',
-      'Aset per Type Model (Top 6)',
+      'Aset per Type Model',
     ]) {
       // Exact match: "Aset per Type" would otherwise also match the
-      // "Aset per Type Model (Top 6)" heading (strict-mode violation).
+      // "Aset per Type Model" heading (strict-mode violation).
       await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible()
     }
 
@@ -51,6 +51,54 @@ test.describe('dashboard (desktop)', () => {
 
     // Progress bars render (the count-scaled inner bar div uses bg-primary).
     await expect(page.locator('.bg-primary.rounded-full').first()).toBeVisible()
+  })
+
+  test('dashboard-panel-search-paging: the Type panel filters + pages its real rows', async ({
+    page,
+  }) => {
+    // The "Aset per Type" panel has ~27 real types (> the 6-per-page size), so
+    // it renders its own search box + pagination.
+    const panel = page.getByTestId('panel-Aset per Type')
+    await expect(panel.getByRole('heading', { name: 'Aset per Type', exact: true })).toBeVisible()
+
+    // Pagination is present (more than one page of types).
+    await expect(panel.getByText(/Hal 1\/\d+/)).toBeVisible()
+
+    // Advancing the page changes the "Hal X/Y" indicator.
+    await panel.getByRole('button', { name: 'Berikutnya' }).click()
+    await expect(panel.getByText(/Hal 2\/\d+/)).toBeVisible()
+
+    // The panel search narrows to the real "MISCELLANEOUS" type and resets paging.
+    const search = panel.getByLabel('Cari di Aset per Type')
+    await search.fill('miscellaneous')
+    await expect(panel.getByText('MISCELLANEOUS', { exact: false })).toBeVisible()
+    // A nonsense term shows the panel's local empty state.
+    await search.fill('zzz-nomatch-xyz')
+    await expect(panel.getByText('Tidak ada yang cocok.')).toBeVisible()
+  })
+
+  test('dashboard-panel-search-resets-on-management-change: no stale-empty panel', async ({
+    page,
+  }) => {
+    // Regression: a panel search term used to persist when the management filter
+    // changed, leaving the panel showing "Tidak ada yang cocok" (empty) for the
+    // new data. The panel must reset its search + page when the data changes.
+    const panel = page.getByTestId('panel-Aset per Type')
+    const search = panel.getByLabel('Cari di Aset per Type')
+    await search.fill('kendaraan')
+    await expect(search).toHaveValue('kendaraan')
+
+    // Switch management (re-queries the dashboard → new byType rows).
+    const dashboardCall = page.waitForResponse(
+      (r) => r.url().includes('/api/dashboard') && r.request().method() === 'POST',
+    )
+    await page.getByRole('combobox').click()
+    await page.getByRole('option', { name: 'Corporate' }).click()
+    await dashboardCall
+
+    // The panel is NOT stuck on the stale empty state; it shows real rows again.
+    await expect(panel.getByText('Tidak ada yang cocok.')).toBeHidden()
+    await expect(panel.locator('.bg-primary.rounded-full').first()).toBeVisible()
   })
 
   test('dashboard-management-filter-corporate: 23 real options incl. Corporate; re-scopes stats', async ({

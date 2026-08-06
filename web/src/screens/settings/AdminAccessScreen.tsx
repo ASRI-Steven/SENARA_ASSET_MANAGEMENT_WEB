@@ -235,7 +235,7 @@ export default function AdminAccessScreen() {
     }
   }
 
-  const colSpan = 5
+  const colSpan = 4
 
   return (
     <>
@@ -287,7 +287,6 @@ export default function AdminAccessScreen() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-12">#</TableHead>
                 <TableHead className="w-32">NIK</TableHead>
                 <TableHead>Nama</TableHead>
                 <TableHead>Departemen</TableHead>
@@ -310,9 +309,8 @@ export default function AdminAccessScreen() {
                   </TableCell>
                 </TableRow>
               ) : (
-                filtered.map((r, i) => (
+                filtered.map((r) => (
                   <TableRow key={r.IDX_T_AssetAdminAccess}>
-                    <TableCell className="text-muted-foreground">{i + 1}</TableCell>
                     <TableCell className="tabular-nums text-muted-foreground">
                       {String(r.NIK).trim()}
                     </TableCell>
@@ -380,6 +378,13 @@ export default function AdminAccessScreen() {
                   placeholder="Masukkan NIK"
                   autoFocus
                 />
+              </div>
+            )}
+
+            {editing && (
+              <div className="space-y-1.5">
+                <Label>Department Name</Label>
+                <Input value={editing.DepartmentName || '-'} readOnly disabled />
               </div>
             )}
 

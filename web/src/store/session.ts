@@ -1,5 +1,6 @@
 import { create } from 'zustand'
-import { api, firstRow } from '@/api/client'
+import { persist } from 'zustand/middleware'
+import { api, firstRow, UnauthorizedError } from '@/api/client'
 
 export type SessionStatus = 'unknown' | 'authenticated' | 'unauthenticated'
 
@@ -25,41 +26,61 @@ interface AuthRow {
   Session_ID?: string
 }
 
-// The session lives entirely in the BFF's httpOnly cookie. This store only
-// mirrors the identity (name/NIK) for the UI — it holds no token.
-export const useSession = create<SessionState>((set) => ({
-  status: 'unknown',
-  user: null,
+// The real session lives in the BFF's httpOnly cookie; this store only mirrors
+// the identity for the UI (no token). It is PERSISTED so a page reload (or a
+// Vite HMR full-reload during dev) does NOT reset the user to a logged-out state
+// and bounce them to /login before check() re-validates in the background.
+export const useSession = create<SessionState>()(
+  persist(
+    (set) => ({
+      status: 'unknown',
+      user: null,
 
-  check: async () => {
-    try {
-      const env = await api.get<AuthRow>('/api/auth/check')
-      const row = firstRow(env)
-      if (env.status === 'success' && row?.Name) {
-        set({ status: 'authenticated', user: { nik: row.NIK ?? '', name: row.Name } })
-      } else {
+      check: async () => {
+        try {
+          const env = await api.get<AuthRow>('/api/auth/check')
+          const row = firstRow(env)
+          if (env.status === 'success' && row?.Name) {
+            set({ status: 'authenticated', user: { nik: row.NIK ?? '', name: row.Name } })
+          } else {
+            // Server answered but there's no valid session → definitely logged out.
+            set({ status: 'unauthenticated', user: null })
+          }
+        } catch (e) {
+          if (e instanceof UnauthorizedError) {
+            // Explicit 401 → the session is gone.
+            set({ status: 'unauthenticated', user: null })
+          }
+          // Any OTHER error (network hiccup, an aborted request when Vite HMR
+          // reloads the page mid-flight, BFF momentarily down) is TRANSIENT — do
+          // NOT log the user out. Keep the current (possibly persisted) status.
+        }
+      },
+
+      login: async (nik, password) => {
+        const env = await api.post<AuthRow>('/api/auth/login', { NIK: nik, Password: password })
+        const row = firstRow(env)
+        if (env.status !== 'success' || !row?.Session_ID) {
+          throw new Error(env.message || 'NIK atau password salah')
+        }
+        set({ status: 'authenticated', user: { nik: row.NIK ?? nik, name: row.Name ?? nik } })
+      },
+
+      logout: async () => {
+        try {
+          await api.post('/api/auth/logout')
+        } catch {
+          // ignore — clear the UI regardless
+        }
         set({ status: 'unauthenticated', user: null })
-      }
-    } catch {
-      set({ status: 'unauthenticated', user: null })
-    }
-  },
-
-  login: async (nik, password) => {
-    const env = await api.post<AuthRow>('/api/auth/login', { NIK: nik, Password: password })
-    const row = firstRow(env)
-    if (env.status !== 'success' || !row?.Session_ID) {
-      throw new Error(env.message || 'NIK atau password salah')
-    }
-    set({ status: 'authenticated', user: { nik: row.NIK ?? nik, name: row.Name ?? nik } })
-  },
-
-  logout: async () => {
-    try {
-      await api.post('/api/auth/logout')
-    } catch {
-      // ignore — clear the UI regardless
-    }
-    set({ status: 'unauthenticated', user: null })
-  },
-}))
+      },
+    }),
+    {
+      name: 'asrilup-session',
+      // Persist identity + status. A rehydrated 'authenticated' lets the app
+      // render immediately on reload while check() re-validates in the
+      // background (and only a definitive 401/no-session flips to logged-out).
+      partialize: (s) => ({ user: s.user, status: s.status }),
+    },
+  ),
+)

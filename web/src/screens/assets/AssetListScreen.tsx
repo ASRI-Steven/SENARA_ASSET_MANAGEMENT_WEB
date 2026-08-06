@@ -13,7 +13,10 @@ import {
   ArrowDown,
   ChevronsUpDown,
   ArrowDownUp,
+  FileDown,
+  RotateCcw,
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -43,15 +46,28 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Textarea } from '@/components/ui/textarea'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { Combobox, type ComboboxOption } from '@/components/ui/combobox'
 import { cn } from '@/lib/utils'
 import { numberWithDots, rupiah, toNumber } from '@/lib/format'
 import { statusColorClass } from '@/lib/assetStatus'
 import {
   searchAssets,
   fetchAssetLookups,
+  returnAssets,
   type AssetRow,
   type AssetPage,
   type AssetLookups,
+  type AssetSearchParams,
 } from '@/api/assets'
 import { AssetActionsMenu } from './AssetActions'
 
@@ -77,8 +93,37 @@ const SORT_FIELDS: Record<SortKey, { index: number; label: string }> = {
 }
 const DEFAULT_SORT: { key: SortKey; dir: SortDir } = { key: 'assetId', dir: 'asc' }
 
+// Assign/Unassign filter — maps to the SP's ReturnAsset INT param. Legacy
+// AssetList.vue used {Assign:0, UnAssign:1}; leaving it unset returns all rows,
+// which we surface as the "Semua" option (value ALL, param omitted).
+const RETURN_ASSET_OPTIONS: { value: string; label: string }[] = [
+  { value: '0', label: 'Assigned' },
+  { value: '1', label: 'Unassigned' },
+]
+
 function assetRowKey(a: AssetRow, i: number): string {
   return `${a.IDX_M_Asset}-${a.RunningNumber ?? i}`
+}
+
+/**
+ * A disabled (deactivated) asset. The grid SP returns Status='DISABLED' for such
+ * rows (and isEnable=1 = the "enable" action is available). Legacy marked these
+ * with an orange badge / "DISABLE" label; we mirror that.
+ */
+function assetDisabled(a: AssetRow): boolean {
+  return a.Status?.toUpperCase() === 'DISABLED' || a.isEnable === 1
+}
+
+/** "NONAKTIF" marker shown next to the AssetID of a deactivated asset. */
+function NonaktifBadge() {
+  return (
+    <Badge
+      variant="outline"
+      className="border-amber-400 bg-amber-50 px-1.5 py-0 text-[10px] font-semibold text-amber-700"
+    >
+      NONAKTIF
+    </Badge>
+  )
 }
 
 function StatusBadge({ asset }: { asset: AssetRow }) {
@@ -100,12 +145,18 @@ function AssetCard({ asset, onChanged }: { asset: AssetRow; onChanged: () => voi
     <Card className="border-0 shadow-sm transition-shadow hover:shadow-md">
       <CardContent className="flex h-full flex-col gap-2 p-4">
         <div className="flex items-start justify-between gap-2">
-          <Link
-            to={`/assets/${encodeURIComponent(asset.AssetID)}`}
-            className="truncate font-semibold text-primary hover:underline"
-          >
-            {asset.AssetID}
-          </Link>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <Link
+              to={`/assets/${encodeURIComponent(asset.AssetID)}`}
+              className={cn(
+                'truncate font-semibold hover:underline',
+                assetDisabled(asset) ? 'text-muted-foreground line-through' : 'text-primary',
+              )}
+            >
+              {asset.AssetID}
+            </Link>
+            {assetDisabled(asset) && <NonaktifBadge />}
+          </div>
           <AssetActionsMenu asset={asset} onChanged={onChanged} />
         </div>
         <StatusBadge asset={asset} />
@@ -135,6 +186,8 @@ export default function AssetListScreen() {
   const [user, setUser] = useState(ALL) // holds IDX_M_AssetUser as string, or "all"
   const [brand, setBrand] = useState(ALL) // holds IDX_M_AssetBrand as string, or "all"
   const [department, setDepartment] = useState(ALL) // holds DepartmentName, or "all"
+  const [company, setCompany] = useState(ALL) // holds IDX_M_Company as string, or "all"
+  const [returnAsset, setReturnAsset] = useState(ALL) // Assign/Unassign — "0"/"1", or "all"
   const [sortKey, setSortKey] = useState<SortKey>(DEFAULT_SORT.key)
   const [sortDir, setSortDir] = useState<SortDir>(DEFAULT_SORT.dir)
   const [page, setPage] = useState(1)
@@ -150,6 +203,13 @@ export default function AssetListScreen() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
+  const [reporting, setReporting] = useState(false)
+
+  // Bulk multi-select (by IDX_M_Asset) → "Return User" action. Mirrors the
+  // legacy Datagrid: a per-row + select-all checkbox (gated on page isUpdate)
+  // driving a bulk Return User dialog (gated on page isReturn).
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [returnOpen, setReturnOpen] = useState(false)
 
   function changeView(v: View) {
     setView(v)
@@ -180,6 +240,37 @@ export default function AssetListScreen() {
     }
   }, [])
 
+  // The search params (minus paging) shared by the grid fetch and the PDF
+  // report, so the report always matches exactly what's on screen.
+  const searchParams = useMemo<Omit<AssetSearchParams, 'CurrentPage' | 'PageSize'>>(
+    () => ({
+      Keyword: keyword || undefined,
+      IDX_M_AssetType: type !== ALL ? Number(type) : undefined,
+      IDX_M_AssetStatus: status !== ALL ? Number(status) : undefined,
+      IDX_M_AssetLocation: location !== ALL ? Number(location) : undefined,
+      IDX_M_AssetUser: user !== ALL ? Number(user) : undefined,
+      IDX_M_AssetBrand: brand !== ALL ? Number(brand) : undefined,
+      DepartmentName: department !== ALL ? department : undefined,
+      IDX_M_Company: company !== ALL ? Number(company) : undefined,
+      ReturnAsset: returnAsset !== ALL ? Number(returnAsset) : undefined,
+      SortBy: SORT_FIELDS[sortKey].index,
+      SortSequence: SEQ[sortDir],
+    }),
+    [
+      keyword,
+      type,
+      status,
+      location,
+      user,
+      brand,
+      department,
+      company,
+      returnAsset,
+      sortKey,
+      sortDir,
+    ],
+  )
+
   // Keep the latest request identity so stale responses are ignored.
   const reqId = useRef(0)
 
@@ -188,23 +279,13 @@ export default function AssetListScreen() {
     const id = ++reqId.current
     setLoading(true)
     setError(null)
-    searchAssets({
-      CurrentPage: page,
-      PageSize: PAGE_SIZE,
-      Keyword: keyword || undefined,
-      IDX_M_AssetType: type !== ALL ? Number(type) : undefined,
-      IDX_M_AssetStatus: status !== ALL ? Number(status) : undefined,
-      IDX_M_AssetLocation: location !== ALL ? Number(location) : undefined,
-      IDX_M_AssetUser: user !== ALL ? Number(user) : undefined,
-      IDX_M_AssetBrand: brand !== ALL ? Number(brand) : undefined,
-      DepartmentName: department !== ALL ? department : undefined,
-      SortBy: SORT_FIELDS[sortKey].index,
-      SortSequence: SEQ[sortDir],
-    })
+    searchAssets({ ...searchParams, CurrentPage: page, PageSize: PAGE_SIZE })
       .then((res) => {
         if (id !== reqId.current) return
         setData(res.rows)
         setPageInfo(res.page)
+        // A new result set invalidates any prior row selection.
+        setSelected(new Set())
       })
       .catch((e: unknown) => {
         if (id !== reqId.current) return
@@ -215,13 +296,20 @@ export default function AssetListScreen() {
       .finally(() => {
         if (id === reqId.current) setLoading(false)
       })
-  }, [keyword, type, status, location, user, brand, department, sortKey, sortDir, page, reloadKey])
+  }, [searchParams, page, reloadKey])
 
   const maxPage = pageInfo?.MaxPage ?? 1
   const total = pageInfo?.TotalRecords ?? 0
-  const activeFilters = [type, status, location, user, brand, department].filter(
-    (v) => v !== ALL,
-  ).length
+  const activeFilters = [
+    type,
+    status,
+    location,
+    user,
+    brand,
+    department,
+    company,
+    returnAsset,
+  ].filter((v) => v !== ALL).length
 
   const description = useMemo(() => {
     if (loading && !pageInfo) return 'Memuat…'
@@ -256,11 +344,14 @@ export default function AssetListScreen() {
       })) ?? [],
     [lookups],
   )
-  const userOptions = useMemo(
+  // User options feed the searchable Combobox (≈2,100 users). The department is
+  // surfaced as a hint so it's searchable too.
+  const userOptions = useMemo<ComboboxOption[]>(
     () =>
       lookups?.users.map((u) => ({
         value: String(u.IDX_M_AssetUser),
         label: u.AssetUserName,
+        hint: u.DepartmentName ?? undefined,
       })) ?? [],
     [lookups],
   )
@@ -279,6 +370,97 @@ export default function AssetListScreen() {
         .map((d) => ({ value: d.DepartmentName, label: d.DepartmentName })) ?? [],
     [lookups],
   )
+  const companyOptions = useMemo(
+    () =>
+      lookups?.companies.map((c) => ({
+        value: String(c.IDX_M_Company),
+        label: c.CompanyAlias ? `${c.CompanyName} (${c.CompanyAlias})` : c.CompanyName,
+      })) ?? [],
+    [lookups],
+  )
+
+  // Human-readable "Label: value" lines for the active filters — printed in the
+  // PDF report header so a reader knows exactly what was filtered.
+  const filterSummary = useMemo<string[]>(() => {
+    const labelOf = (
+      opts: { value: string; label: string }[],
+      v: string,
+    ): string => opts.find((o) => o.value === v)?.label ?? v
+    const out: string[] = []
+    if (keyword) out.push(`Pencarian: ${keyword}`)
+    if (type !== ALL) out.push(`Type: ${labelOf(typeOptions, type)}`)
+    if (brand !== ALL) out.push(`Brand: ${labelOf(brandOptions, brand)}`)
+    if (status !== ALL) out.push(`Status: ${labelOf(statusOptions, status)}`)
+    if (user !== ALL) out.push(`User: ${labelOf(userOptions, user)}`)
+    if (department !== ALL) out.push(`Department: ${department}`)
+    if (location !== ALL) out.push(`Location: ${labelOf(locationOptions, location)}`)
+    if (returnAsset !== ALL)
+      out.push(`Assign: ${labelOf(RETURN_ASSET_OPTIONS, returnAsset)}`)
+    if (company !== ALL) out.push(`Company: ${labelOf(companyOptions, company)}`)
+    return out
+  }, [
+    keyword,
+    type,
+    brand,
+    status,
+    user,
+    department,
+    location,
+    returnAsset,
+    company,
+    typeOptions,
+    brandOptions,
+    statusOptions,
+    userOptions,
+    locationOptions,
+    companyOptions,
+  ])
+
+  // Generate + download a PDF of the current filtered result set.
+  async function handlePrintReport() {
+    if (reporting) return
+    // No row cap (prints every matching asset), but a very large unfiltered
+    // export is slow + produces a big PDF — warn the user so they can filter first.
+    if (total > 10000) {
+      const ok = window.confirm(
+        `Laporan akan mencetak ${numberWithDots(total)} aset. Ini bisa memakan waktu ` +
+          `dan menghasilkan file besar. Sebaiknya persempit dengan filter dulu. Tetap lanjutkan?`,
+      )
+      if (!ok) return
+    }
+    setReporting(true)
+    const toastId = toast.loading('Menyiapkan laporan PDF…')
+    try {
+      // Lazy-load the (heavy) jsPDF report module so it only ships when the
+      // user actually prints — keeps the list-screen bundle light.
+      const { buildAssetReport } = await import('@/lib/assetReport')
+      const res = await buildAssetReport({
+        params: searchParams,
+        filterSummary,
+        title: 'Laporan Aset',
+      })
+      if (res.rowCount === 0) {
+        toast.error('Tidak ada aset untuk dicetak.', { id: toastId })
+      } else if (res.truncated) {
+        toast.success(
+          `Laporan diunduh: ${numberWithDots(res.rowCount)} dari ${numberWithDots(
+            res.totalRecords,
+          )} aset (dibatasi).`,
+          { id: toastId },
+        )
+      } else {
+        toast.success(`Laporan diunduh: ${numberWithDots(res.rowCount)} aset.`, {
+          id: toastId,
+        })
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Gagal membuat laporan.', {
+        id: toastId,
+      })
+    } finally {
+      setReporting(false)
+    }
+  }
 
   function resetFilters() {
     setType(ALL)
@@ -287,6 +469,8 @@ export default function AssetListScreen() {
     setUser(ALL)
     setBrand(ALL)
     setDepartment(ALL)
+    setCompany(ALL)
+    setReturnAsset(ALL)
     setPage(1)
   }
 
@@ -309,6 +493,35 @@ export default function AssetListScreen() {
     setReloadKey((k) => k + 1)
   }
 
+  // --- Bulk selection (mirrors legacy Datagrid) ---
+  // Checkboxes appear only when the page grants isUpdate; the Return User bulk
+  // action only when it grants isReturn (legacy gated both the same way).
+  const canSelect = pageInfo?.isUpdate === 1
+  const canReturn = pageInfo?.isReturn === 1
+  const allSelected = data.length > 0 && data.every((a) => selected.has(a.IDX_M_Asset))
+  const someSelected = selected.size > 0 && !allSelected
+
+  function toggleRow(idx: number, checked: boolean) {
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(idx)
+      else next.delete(idx)
+      return next
+    })
+  }
+
+  // Select-all toggles only THIS page's rows (legacy ct_selectAll scope).
+  function toggleAll(checked: boolean) {
+    setSelected(checked ? new Set(data.map((a) => a.IDX_M_Asset)) : new Set())
+  }
+
+  // The selected rows still present in the current page — drives the dialog's
+  // AssetID list and the actual return payload (IDX_M_Asset ids).
+  const selectedRows = useMemo(
+    () => data.filter((a) => selected.has(a.IDX_M_Asset)),
+    [data, selected],
+  )
+
   return (
     <>
       <PageHeader
@@ -316,6 +529,19 @@ export default function AssetListScreen() {
         description={description}
         action={
           <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={handlePrintReport}
+              disabled={reporting}
+              aria-label="Cetak laporan PDF"
+            >
+              {reporting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileDown className="h-4 w-4" />
+              )}
+              <span className="hidden sm:inline">Cetak Laporan</span>
+            </Button>
             <Button asChild variant="outline">
               <Link to="/print-qr">
                 <QrCode className="h-4 w-4" /> Print QR
@@ -358,61 +584,97 @@ export default function AssetListScreen() {
             </SheetHeader>
             {/* Only mount the (large) option lists while the sheet is open. */}
             {filterOpen && (
-              <div className="flex-1 space-y-4 overflow-y-auto pr-1">
-                <FilterSelect
-                  label="Type"
-                  value={type}
-                  onChange={(v) => {
-                    setType(v)
-                    setPage(1)
-                  }}
-                  options={typeOptions}
-                />
-                <FilterSelect
-                  label="Status"
-                  value={status}
-                  onChange={(v) => {
-                    setStatus(v)
-                    setPage(1)
-                  }}
-                  options={statusOptions}
-                />
-                <FilterSelect
-                  label="Location"
-                  value={location}
-                  onChange={(v) => {
-                    setLocation(v)
-                    setPage(1)
-                  }}
-                  options={locationOptions}
-                />
-                <FilterSelect
-                  label="User"
-                  value={user}
-                  onChange={(v) => {
-                    setUser(v)
-                    setPage(1)
-                  }}
-                  options={userOptions}
-                />
-                <FilterSelect
-                  label="Brand"
-                  value={brand}
-                  onChange={(v) => {
-                    setBrand(v)
-                    setPage(1)
-                  }}
-                  options={brandOptions}
-                />
-                <FilterSelect
-                  label="Department"
-                  value={department}
-                  onChange={(v) => {
-                    setDepartment(v)
-                    setPage(1)
-                  }}
-                  options={departmentOptions}
-                />
+              <div className="flex-1 space-y-5 overflow-y-auto pr-1">
+                {/* Aset — the asset's own attributes.
+                    NB: Type must stay the FIRST role=combobox in the sheet
+                    (the IAT locates it via getByRole('combobox').first()). */}
+                <FilterGroup title="Aset">
+                  <FilterSelect
+                    label="Type"
+                    value={type}
+                    onChange={(v) => {
+                      setType(v)
+                      setPage(1)
+                    }}
+                    options={typeOptions}
+                  />
+                  <FilterSelect
+                    label="Brand"
+                    value={brand}
+                    onChange={(v) => {
+                      setBrand(v)
+                      setPage(1)
+                    }}
+                    options={brandOptions}
+                  />
+                  <FilterSelect
+                    label="Status"
+                    value={status}
+                    onChange={(v) => {
+                      setStatus(v)
+                      setPage(1)
+                    }}
+                    options={statusOptions}
+                  />
+                </FilterGroup>
+
+                {/* Penempatan — where / to whom the asset is assigned. */}
+                <FilterGroup title="Penempatan">
+                  <div className="space-y-1.5">
+                    <Label>User</Label>
+                    <Combobox
+                      title="Pilih User"
+                      placeholder="Semua User"
+                      clearable
+                      value={user === ALL ? '' : user}
+                      onChange={(v) => {
+                        setUser(v ? v : ALL)
+                        setPage(1)
+                      }}
+                      options={userOptions}
+                    />
+                  </div>
+                  <FilterSelect
+                    label="Department"
+                    value={department}
+                    onChange={(v) => {
+                      setDepartment(v)
+                      setPage(1)
+                    }}
+                    options={departmentOptions}
+                  />
+                  <FilterSelect
+                    label="Location"
+                    value={location}
+                    onChange={(v) => {
+                      setLocation(v)
+                      setPage(1)
+                    }}
+                    options={locationOptions}
+                  />
+                  <FilterSelect
+                    label="Assign / Unassign"
+                    value={returnAsset}
+                    onChange={(v) => {
+                      setReturnAsset(v)
+                      setPage(1)
+                    }}
+                    options={RETURN_ASSET_OPTIONS}
+                  />
+                </FilterGroup>
+
+                {/* Kepemilikan — company. */}
+                <FilterGroup title="Kepemilikan">
+                  <FilterSelect
+                    label="Company"
+                    value={company}
+                    onChange={(v) => {
+                      setCompany(v)
+                      setPage(1)
+                    }}
+                    options={companyOptions}
+                  />
+                </FilterGroup>
               </div>
             )}
             <Button variant="outline" className="mt-4 w-full shrink-0" onClick={resetFilters}>
@@ -460,6 +722,24 @@ export default function AssetListScreen() {
         </div>
       </div>
 
+      {/* Bulk action bar — shown when the page allows Return and ≥1 row is
+          selected. Mirrors the legacy Datagrid "Return User" toolbar button. */}
+      {canReturn && selected.size > 0 && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-md border bg-muted/40 px-4 py-2.5">
+          <span className="text-sm text-foreground">
+            {numberWithDots(selected.size)} aset dipilih
+          </span>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+              Batal Pilih
+            </Button>
+            <Button size="sm" onClick={() => setReturnOpen(true)}>
+              <RotateCcw className="h-4 w-4" /> Return User
+            </Button>
+          </div>
+        </div>
+      )}
+
       {error ? (
         <Card className="border-0 shadow-sm">
           <CardContent className="flex flex-col items-center gap-3 p-10 text-center">
@@ -489,6 +769,15 @@ export default function AssetListScreen() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    {canSelect && (
+                      <TableHead className="w-10">
+                        <Checkbox
+                          checked={allSelected ? true : someSelected ? 'indeterminate' : false}
+                          onCheckedChange={(v) => toggleAll(v === true)}
+                          aria-label="Pilih semua aset di halaman ini"
+                        />
+                      </TableHead>
+                    )}
                     <SortableHead
                       label="Asset ID"
                       sortKey="assetId"
@@ -496,7 +785,9 @@ export default function AssetListScreen() {
                       dir={sortDir}
                       onToggle={toggleSort}
                     />
-                    <TableHead>Type / Model</TableHead>
+                    <TableHead>User</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Model</TableHead>
                     <SortableHead
                       label="Status"
                       sortKey="status"
@@ -504,7 +795,6 @@ export default function AssetListScreen() {
                       dir={sortDir}
                       onToggle={toggleSort}
                     />
-                    <TableHead>User</TableHead>
                     <SortableHead
                       label="Location"
                       sortKey="location"
@@ -512,33 +802,57 @@ export default function AssetListScreen() {
                       dir={sortDir}
                       onToggle={toggleSort}
                     />
-                    <TableHead className="text-right">Nilai</TableHead>
-                    <TableHead className="w-10" />
+                    <TableHead>Department</TableHead>
+                    <TableHead>Color</TableHead>
+                    <TableHead>Company</TableHead>
+                    <TableHead className="w-10">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {data.map((a, i) => (
-                    <TableRow key={assetRowKey(a, i)}>
+                    <TableRow
+                      key={assetRowKey(a, i)}
+                      data-state={selected.has(a.IDX_M_Asset) ? 'selected' : undefined}
+                    >
+                      {canSelect && (
+                        <TableCell>
+                          <Checkbox
+                            checked={selected.has(a.IDX_M_Asset)}
+                            onCheckedChange={(v) => toggleRow(a.IDX_M_Asset, v === true)}
+                            aria-label={`Pilih aset ${a.AssetID}`}
+                          />
+                        </TableCell>
+                      )}
                       <TableCell>
-                        <Link
-                          to={`/assets/${encodeURIComponent(a.AssetID)}`}
-                          className="font-medium text-primary hover:underline"
-                        >
-                          {a.AssetID}
-                        </Link>
+                        <div className="flex items-center gap-1.5">
+                          <Link
+                            to={`/assets/${encodeURIComponent(a.AssetID)}`}
+                            className={cn(
+                              'font-medium hover:underline',
+                              assetDisabled(a)
+                                ? 'text-muted-foreground line-through'
+                                : 'text-primary',
+                            )}
+                          >
+                            {a.AssetID}
+                          </Link>
+                          {assetDisabled(a) && <NonaktifBadge />}
+                        </div>
                       </TableCell>
-                      <TableCell>
-                        <div className="font-medium text-foreground">{a.AssetTypeName}</div>
-                        <div className="text-xs text-muted-foreground">{a.AssetTypeModelName}</div>
+                      <TableCell
+                        className={cn(assetDisabled(a) && 'text-muted-foreground')}
+                      >
+                        {a.CurrentAssetUser}
                       </TableCell>
+                      <TableCell>{a.AssetTypeName}</TableCell>
+                      <TableCell>{a.AssetTypeModelName}</TableCell>
                       <TableCell>
                         <StatusBadge asset={a} />
                       </TableCell>
-                      <TableCell>{a.CurrentAssetUser}</TableCell>
                       <TableCell>{a.CurrentAssetLocation}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {rupiah(Math.round(toNumber(a.UnitPrice)))}
-                      </TableCell>
+                      <TableCell>{a.CurrentAssetDepartment}</TableCell>
+                      <TableCell>{a.AssetColorName}</TableCell>
+                      <TableCell>{a.CompanyAlias || a.CompanyName}</TableCell>
                       <TableCell>
                         <AssetActionsMenu asset={a} onChanged={refresh} />
                       </TableCell>
@@ -576,7 +890,111 @@ export default function AssetListScreen() {
           onChange={setPage}
         />
       )}
+
+      {/* Bulk "Return User" confirm dialog (Remarks + selected AssetIDs). */}
+      <BulkReturnDialog
+        open={returnOpen}
+        onOpenChange={setReturnOpen}
+        rows={selectedRows}
+        onDone={() => {
+          setSelected(new Set())
+          refresh()
+        }}
+      />
     </>
+  )
+}
+
+/**
+ * Bulk "Return User" confirm dialog. Shows the selected AssetIDs + a Remarks
+ * field; on confirm POSTs /api/assets/return with the comma-joined IDX_M_Asset
+ * ids (via returnAssets), then toasts and lets the caller clear + refresh.
+ * Mirrors the legacy Datagrid return dialog.
+ */
+function BulkReturnDialog({
+  open,
+  onOpenChange,
+  rows,
+  onDone,
+}: {
+  open: boolean
+  onOpenChange: (o: boolean) => void
+  rows: AssetRow[]
+  onDone: () => void
+}) {
+  const [remarks, setRemarks] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (open) setRemarks('')
+  }, [open])
+
+  async function submit() {
+    if (rows.length === 0) return
+    setSubmitting(true)
+    try {
+      const msg = await returnAssets({
+        IDX_M_Asset: rows.map((r) => r.IDX_M_Asset),
+        Remarks: remarks,
+      })
+      toast.success(msg || `${rows.length} aset berhasil dikembalikan`)
+      onOpenChange(false)
+      onDone()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Gagal mengembalikan aset')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !submitting && onOpenChange(o)}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Return User</DialogTitle>
+          <DialogDescription>
+            Kembalikan {numberWithDots(rows.length)} aset berikut dari user saat ini.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label>Asset ID</Label>
+            <div className="max-h-32 overflow-y-auto rounded-md border p-2">
+              <div className="flex flex-wrap gap-1.5">
+                {rows.map((r) => (
+                  <Badge key={r.IDX_M_Asset} variant="secondary" className="font-normal">
+                    {r.AssetID}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Remarks</Label>
+            <Textarea
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              rows={2}
+              disabled={submitting}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            type="button"
+            onClick={() => onOpenChange(false)}
+            disabled={submitting}
+          >
+            Batal
+          </Button>
+          <Button type="button" onClick={submit} disabled={submitting || rows.length === 0}>
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Return
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -807,16 +1225,31 @@ function SortControl({
   )
 }
 
+/** A titled group of related filter fields inside the sheet. */
+function FilterGroup({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="space-y-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {title}
+      </p>
+      {children}
+    </div>
+  )
+}
+
 function FilterSelect({
   label,
   value,
   onChange,
   options,
+  allLabel,
 }: {
   label: string
   value: string
   onChange: (v: string) => void
   options: { value: string; label: string }[]
+  /** Text for the "all / none selected" item + placeholder. Default: `Semua ${label}`. */
+  allLabel?: string
 }) {
   // Some option lists are large (users ≈2,100). Only build the <SelectItem>s
   // while the dropdown is open so opening the Filter sheet stays snappy. The
@@ -824,15 +1257,36 @@ function FilterSelect({
   // trigger keeps its label even while closed.
   const [open, setOpen] = useState(false)
   const selected = options.find((o) => o.value === value)
+  const all = allLabel ?? `Semua ${label}`
+  // Keep the "Semua …" placeholder text in the trigger even after a value is
+  // picked: unset it reads "Semua Management"; set it reads "Semua Management ·
+  // Corporate". This gives each select a STABLE, unique text handle (so it can
+  // be targeted by its "Semua …" label regardless of selection) while still
+  // showing the chosen value — a familiar "field: value" filter-chip pattern.
   return (
     <div className="space-y-1.5">
       <Label>{label}</Label>
       <Select value={value} onValueChange={onChange} open={open} onOpenChange={setOpen}>
         <SelectTrigger>
-          <SelectValue placeholder={`Semua ${label}`} />
+          {selected ? (
+            <span className="flex min-w-0 items-center gap-1.5 truncate">
+              <span className="shrink-0 text-muted-foreground">{all}</span>
+              <span className="shrink-0 text-muted-foreground">·</span>
+              <span className="truncate font-medium text-foreground">
+                {selected.label}
+              </span>
+            </span>
+          ) : (
+            <span className="truncate text-muted-foreground">{all}</span>
+          )}
         </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={ALL}>Semua {label}</SelectItem>
+        {/* Close instantly (no exit animation): a large option list (brand ≈800)
+            otherwise keeps the popover mounted through its fade/zoom-out, which
+            traps focus long enough that a follow-up Escape lands on the popover
+            instead of the Filter sheet. Skipping the close animation returns
+            focus to the sheet immediately so Escape reliably dismisses it. */}
+        <SelectContent className="data-[state=closed]:animate-none data-[state=closed]:duration-0">
+          <SelectItem value={ALL}>{all}</SelectItem>
           {open
             ? options.map((o) => (
                 <SelectItem key={o.value} value={o.value}>

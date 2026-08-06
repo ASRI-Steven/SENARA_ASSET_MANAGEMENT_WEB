@@ -25,7 +25,7 @@ test.describe('navigation (desktop)', () => {
 
     await sidebar.getByRole('link', { name: 'Master Data' }).click()
     await expect(page).toHaveURL(/\/master$/)
-    await expect(page.getByRole('heading', { name: 'Master Data' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Asset Master' })).toBeVisible()
 
     await sidebar.getByRole('link', { name: 'Print QR' }).click()
     await expect(page).toHaveURL(/\/print-qr$/)

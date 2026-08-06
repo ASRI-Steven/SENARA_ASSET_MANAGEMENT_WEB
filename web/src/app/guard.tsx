@@ -10,9 +10,12 @@ export function RouteGuard({ children }: { children: ReactNode }) {
   const check = useSession((s) => s.check)
   const location = useLocation()
 
+  // Re-validate the session once on mount. With a persisted 'authenticated'
+  // status the app renders immediately (no splash, no bounce to /login) while
+  // this runs in the background; only a definitive 401/no-session logs out.
   useEffect(() => {
-    if (status === 'unknown') void check()
-  }, [status, check])
+    void check()
+  }, [check])
 
   if (status === 'unknown') {
     return (

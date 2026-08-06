@@ -20,6 +20,12 @@ type Config struct {
 	// SessionCookieSecure sets the Secure flag on the session cookie. Default
 	// true (prod HTTPS). Set SESSION_COOKIE_INSECURE=1 for local http dev.
 	SessionCookieSecure bool
+
+	// DBGroup is the secondary database that holds the usp_CMS_AssetGroup* stored
+	// procedures (Group Access + Asset Group master). These live in AssetICTDB,
+	// NOT in the primary GeneralAffairDB. Defaults to the same server/credentials
+	// as DB with database = AssetICTDB (override the name via DB_GROUP_NAME).
+	DBGroup mssql.Config
 }
 
 const (
@@ -30,15 +36,17 @@ const (
 	EnvDBPass    = "DB_PASSWORD"
 	EnvDBEncrypt = "DB_ENCRYPT"
 	EnvDBTLSMin  = "DB_TLS_MIN"
+	EnvDBGroup   = "DB_GROUP_NAME"
 	EnvPort      = "PORT"
 	EnvSPAOrig   = "SPA_ORIGIN"
 	EnvInsecure  = "SESSION_COOKIE_INSECURE"
 )
 
 const (
-	defaultDBPort    = "1433"
-	defaultPort      = "8080"
-	defaultSPAOrigin = "http://localhost:5173"
+	defaultDBPort     = "1433"
+	defaultPort       = "8080"
+	defaultSPAOrigin  = "http://localhost:5173"
+	defaultDBGroupName = "AssetICTDB"
 )
 
 // Load reads and validates configuration, failing fast on missing required keys.
@@ -79,5 +87,11 @@ func Load() (Config, error) {
 	if len(missing) > 0 {
 		return Config{}, fmt.Errorf("config: missing required env vars: %s", strings.Join(missing, ", "))
 	}
+
+	// Secondary pool for the AssetGroup SPs: same server/credentials, different
+	// database (AssetICTDB by default).
+	cfg.DBGroup = cfg.DB
+	cfg.DBGroup.Database = def(EnvDBGroup, defaultDBGroupName)
+
 	return cfg, nil
 }

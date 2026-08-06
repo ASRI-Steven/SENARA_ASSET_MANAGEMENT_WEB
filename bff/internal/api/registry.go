@@ -97,7 +97,11 @@ func bodyParams(sess bool, names ...string) []param {
 func endpoints() []endpoint {
 	eps := []endpoint{
 		// --- Security / shell ---
-		{"GET", "/api/menu", "usp_SECURITY_PopulateRootMenuAccess",
+		// Full accessible-menu list (roots + children) for the logged-in user, with
+		// per-form R/I/U/D flags — used to filter the nav. usp_SM_PopulateMenuAccess
+		// lives only in SecurityManagementDB, so call it 3-part-qualified (the primary
+		// GeneralAffairDB connection reaches it cross-DB; sa has rights).
+		{"GET", "/api/menu", "SecurityManagementDB.dbo.usp_SM_PopulateMenuAccess",
 			[]param{sess(), c("IPAddress", ""), c("IDX_M_Apps", "32"), c("Status", ""), c("RecordStatus", "")}},
 
 		// --- Dashboard ---
@@ -128,7 +132,11 @@ func endpoints() []endpoint {
 		{"POST", "/api/assets/assign-status", "usp_CMS_ManageAsset_Status_Assign", bodyParams(true, "IDX_M_Asset", "IDX_M_AssetStatus", "Remarks")},
 		{"POST", "/api/assets/change-management", "usp_CMS_ManageAsset_Management_Change", bodyParams(true, "IDX_M_Asset", "IDX_M_AssetManagement", "Remarks")},
 		{"POST", "/api/assets/change-company", "usp_CMS_ManageAsset_Company_Change", bodyParams(true, "IDX_M_Asset", "IDX_M_Company", "Remarks")},
-		{"POST", "/api/assets/return", "usp_CMS_ManageAsset_User_ReturnMultiple", bodyParams(true, "IDX_M_Asset", "Remarks")},
+		// /api/assets/return is NOT here — it has a custom handler (s.handleReturn)
+		// because the CSV SP usp_CMS_ManageAsset_User_ReturnMultiple lives only in
+		// AssetICTDB (a different, smaller dataset), not the primary GeneralAffairDB
+		// that holds the real asset data. The handler loops the single-asset
+		// usp_CMS_ManageAsset_User_Return (present in GeneralAffairDB) instead.
 		{"POST", "/api/assets/enable", "usp_CMS_Asset_Enable", bodyParams(true, "IDX_M_Asset")},
 		{"POST", "/api/assets/disable", "usp_CMS_Asset_Disable", bodyParams(true, "IDX_M_Asset")},
 

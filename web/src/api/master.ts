@@ -13,10 +13,11 @@ export type MasterEntityKey =
   | 'size'
   | 'status'
   | 'management'
+  | 'group'
   | 'location'
   | 'type'
+  | 'model'
   | 'user'
-// NOTE: 'group' and 'model' SPs are absent/unexercised in the dev DB — omit.
 
 /**
  * Common columns present on every master row. Entity-specific columns
@@ -51,8 +52,40 @@ export interface MasterEntityMeta {
   codeKey?: string
   /** Label for the code column, shown in the UI when codeKey is set. */
   codeLabel?: string
-  /** Whether this entity supports create/update of the plain name via this UI. */
+  /** Label for the name column/input (defaults to a generic "Nama"). */
+  nameLabel?: string
+  /** Hide the asset-count column (legacy Group master has none). */
+  hideCount?: boolean
+  /** Suppress the delete action (legacy Group master is enable/disable only). */
+  noDelete?: boolean
+  /** Whether this entity supports create/update via this UI. */
   editable: boolean
+  /**
+   * Explicit create/edit form fields, in legacy order. When omitted the generic
+   * screen builds a form from codeKey (if any) + nameKey. Entities whose form is
+   * more than "code + name" (Type Model has a parent-Type dropdown; Asset User
+   * has six fields) declare their fields here so the form matches legacy exactly.
+   */
+  formFields?: MasterFormField[]
+}
+
+/** One field in a master create/edit form (mirrors the legacy add/edit dialog). */
+export interface MasterFormField {
+  /** SP parameter name this field maps to (e.g. "AssetTypeModelName", "NIK"). */
+  param: string
+  /** Label shown in the form (exact legacy wording). */
+  label: string
+  control: 'text' | 'select'
+  /** Optional field — not required on submit (e.g. HRIS division/directorate). */
+  optional?: boolean
+  /** For a select: the master entity whose rows populate the dropdown options. */
+  optionsFrom?: MasterEntityKey
+  /** Row column holding the option value (e.g. "IDX_M_AssetType"). */
+  optionValueKey?: string
+  /** Row column holding the option label (e.g. "AssetTypeName"). */
+  optionLabelKey?: string
+  /** Row column to read the current value from when editing (defaults to param). */
+  rowValueKey?: string
 }
 
 export const MASTER_ENTITIES: MasterEntityMeta[] = [
@@ -97,13 +130,26 @@ export const MASTER_ENTITIES: MasterEntityMeta[] = [
     editable: true,
   },
   {
+    // Group (AssetGroup.vue): a plain name master, but legacy never allows
+    // delete — only enable/disable + edit — and shows no asset-count column.
+    key: 'group',
+    label: 'Asset Group',
+    nameKey: 'AssetGroupName',
+    countKey: 'AssetGroupCount',
+    idxKey: 'IDX_M_AssetGroup',
+    hideCount: true,
+    noDelete: true,
+    editable: true,
+  },
+  {
     key: 'location',
     label: 'Asset Location',
     nameKey: 'AssetLocationName',
     countKey: 'AssetLocationCount',
     idxKey: 'IDX_M_AssetLocation',
     codeKey: 'AssetLocationCode',
-    codeLabel: 'Kode',
+    codeLabel: 'Location Code',
+    nameLabel: 'Location Name',
     editable: true,
   },
   {
@@ -113,12 +159,35 @@ export const MASTER_ENTITIES: MasterEntityMeta[] = [
     countKey: 'AssetCount',
     idxKey: 'IDX_M_AssetType',
     codeKey: 'AssetTypeCode',
-    codeLabel: 'Kode',
+    codeLabel: 'Type Code',
+    nameLabel: 'Type Name',
     editable: true,
   },
   {
-    // The User master mirrors HRIS; it isn't a plain name entity, so the UI
-    // renders it read-only (name + NIK + department) and offers no create form.
+    // Model (AssetModel.vue) — "Master Type Model". Legacy add/edit dialog has a
+    // parent-Type dropdown ("Choose Type") + a "Type Model Name" text field.
+    key: 'model',
+    label: 'Master Type Model',
+    nameKey: 'AssetTypeModelName',
+    countKey: 'AssetCount',
+    idxKey: 'IDX_M_AssetTypeModel',
+    editable: true,
+    formFields: [
+      {
+        param: 'IDX_M_AssetType',
+        label: 'Choose Type',
+        control: 'select',
+        optionsFrom: 'type',
+        optionValueKey: 'IDX_M_AssetType',
+        optionLabelKey: 'AssetTypeName',
+        rowValueKey: 'IDX_M_AssetType',
+      },
+      { param: 'AssetTypeModelName', label: 'Type Model Name', control: 'text' },
+    ],
+  },
+  {
+    // Asset User (AssetUser.vue). Legacy add/edit dialog has six text fields.
+    // NIK + Name are required; the HRIS org fields may be blank for some users.
     key: 'user',
     label: 'Asset User',
     nameKey: 'Name',
@@ -126,7 +195,15 @@ export const MASTER_ENTITIES: MasterEntityMeta[] = [
     idxKey: 'IDX_M_AssetUser',
     codeKey: 'NIK',
     codeLabel: 'NIK',
-    editable: false,
+    editable: true,
+    formFields: [
+      { param: 'NIK', label: 'NIK', control: 'text' },
+      { param: 'Name', label: 'Name', control: 'text' },
+      { param: 'PositionName', label: 'Position Name', control: 'text', optional: true },
+      { param: 'DepartmentName', label: 'Department Name', control: 'text', optional: true },
+      { param: 'DivisionName', label: 'Division Name', control: 'text', optional: true },
+      { param: 'DirectorateName', label: 'Directorate Name', control: 'text', optional: true },
+    ],
   },
 ]
 

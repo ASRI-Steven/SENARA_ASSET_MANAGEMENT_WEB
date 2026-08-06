@@ -32,6 +32,13 @@ func main() {
 	}
 	defer db.Close()
 
+	// Secondary pool: AssetICTDB (holds the usp_CMS_AssetGroup* SPs).
+	dbGroup, err := mssql.Open(cfg.DBGroup)
+	if err != nil {
+		log.Fatalf("startup: open group db: %v", err)
+	}
+	defer dbGroup.Close()
+
 	// Ping is best-effort — the office DB may be unreachable from where the BFF
 	// starts. Log a warning but keep serving; the first query surfaces the error.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -41,8 +48,13 @@ func main() {
 	} else {
 		log.Printf("connected to %s/%s", cfg.DB.Host, cfg.DB.Database)
 	}
+	if err := dbGroup.PingContext(ctx); err != nil {
+		log.Printf("warning: cannot reach %s/%s (group) yet: %v", cfg.DBGroup.Host, cfg.DBGroup.Database, err)
+	} else {
+		log.Printf("connected to %s/%s (group)", cfg.DBGroup.Host, cfg.DBGroup.Database)
+	}
 
-	svc := api.NewService(db, cfg.SessionCookieSecure)
+	svc := api.NewService(db, dbGroup, cfg.SessionCookieSecure)
 	handler := api.NewRouter(svc, cfg.SPAOrigin)
 
 	srv := &http.Server{

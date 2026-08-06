@@ -11,7 +11,13 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'prompt',
+      // autoUpdate (not 'prompt'): the app calls registerSW({immediate:true})
+      // but has NO update-prompt UI to post SKIP_WAITING, so a 'prompt' SW would
+      // install and hang in "waiting" forever — the browser keeps serving the old
+      // precached bundle (this was the recurring "stale content / failed to fetch
+      // dynamically imported module" problem). autoUpdate + skipWaiting/clientsClaim
+      // in sw.ts makes a new build take over on the next reload.
+      registerType: 'autoUpdate',
       strategies: 'injectManifest',
       srcDir: 'src/pwa',
       filename: 'sw.ts',

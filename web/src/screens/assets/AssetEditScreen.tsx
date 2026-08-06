@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Save, Loader2, Search, Share2, AlertCircle } from 'lucide-react'
+import { RefreshCw, Save, Loader2, Search, Share2, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Barcode } from '@/components/ui/barcode'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Select,
@@ -29,9 +30,6 @@ import {
   type POMaterialLine,
 } from '@/api/assetForm'
 import { PoSearchDialog } from './PoSearchDialog'
-
-// Per IAT safety, the final update PATCH is disabled by default.
-const ALLOW_REAL_SUBMIT = false
 
 interface EditState {
   model: string
@@ -123,6 +121,25 @@ export default function AssetEditScreen() {
     setForm((prev) => (prev ? { ...prev, [key]: value } : prev))
   }
 
+  // Legacy "Clear" resets the editable fields to empty.
+  function clear() {
+    setForm((prev) =>
+      prev
+        ? {
+            ...prev,
+            model: '',
+            size: '',
+            brand: '',
+            poNo: '',
+            poDate: '',
+            currency: '',
+            unitPrice: '',
+            remarks: '',
+          }
+        : prev,
+    )
+  }
+
   // Models for the asset's type (filtered from lookups[9]).
   const modelOptions: ComboboxOption[] = useMemo(() => {
     if (!lookups || !asset) return []
@@ -181,11 +198,6 @@ export default function AssetEditScreen() {
       Remarks: form.remarks,
     }
 
-    if (!ALLOW_REAL_SUBMIT) {
-      toast.success('Form tervalidasi (submit ke backend dinonaktifkan untuk IAT)')
-      return
-    }
-
     setSubmitting(true)
     try {
       const msg = await updateAsset(payload)
@@ -232,8 +244,13 @@ export default function AssetEditScreen() {
   return (
     <form onSubmit={submit}>
       <PageHeader
-        title={`Edit ${asset.AssetID}`}
-        description={[asset.AssetTypeName, asset.AssetColorName].filter(Boolean).join(' · ')}
+        title={`Edit Asset`}
+        description={
+          <span className="flex items-center gap-3">
+            <span>{asset.AssetID}</span>
+            <Barcode value={asset.AssetID} height={40} />
+          </span>
+        }
         action={
           <div className="flex items-center gap-2">
             {asset.isConnectedASBSPO ? (
@@ -241,14 +258,12 @@ export default function AssetEditScreen() {
                 <Share2 className="h-3 w-3" /> ASBS
               </Badge>
             ) : null}
-            <Button asChild variant="outline" type="button">
-              <Link to={`/assets/${encodeURIComponent(assetId)}`}>
-                <ArrowLeft className="h-4 w-4" /> Kembali
-              </Link>
+            <Button type="button" variant="outline" onClick={clear} disabled={submitting}>
+              <RefreshCw className="h-4 w-4" /> Clear
             </Button>
             <Button type="submit" disabled={submitting}>
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Simpan
+              Update
             </Button>
           </div>
         }
@@ -258,7 +273,6 @@ export default function AssetEditScreen() {
         {/* Read-only info */}
         <Card className="border-0 shadow-sm">
           <CardContent className="grid gap-4 p-5 sm:grid-cols-2">
-            <h3 className="text-sm font-semibold text-foreground sm:col-span-2">Informasi (read-only)</h3>
             <ReadOnlyField label="Managed By" value={asset.AssetManagementName} />
             <ReadOnlyField label="Company" value={asset.CompanyName} />
             <ReadOnlyField label="User" value={asset.CurrentAssetUser} />
@@ -266,15 +280,13 @@ export default function AssetEditScreen() {
             <ReadOnlyField label="Status" value={asset.CurrentAssetStatus} />
             <ReadOnlyField label="Type" value={asset.AssetTypeName} />
             <ReadOnlyField label="Color" value={asset.AssetColorName} />
-            <ReadOnlyField label="Tanggal Aset" value={formatDate(asset.AssetDate)} />
+            <ReadOnlyField label="Asset Date" value={formatDate(asset.AssetDate)} />
           </CardContent>
         </Card>
 
         {/* Editable */}
         <Card className="border-0 shadow-sm">
           <CardContent className="grid gap-4 p-5 sm:grid-cols-2">
-            <h3 className="text-sm font-semibold text-foreground sm:col-span-2">Dapat diedit</h3>
-
             <div className="space-y-1.5">
               <Label>Model</Label>
               <Combobox
@@ -288,18 +300,6 @@ export default function AssetEditScreen() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Size</Label>
-              <Combobox
-                id="asset-size"
-                title="Pilih Size"
-                value={form.size}
-                onChange={(v) => set('size', v)}
-                options={sizeOptions}
-                placeholder="Pilih size"
-              />
-            </div>
-
-            <div className="space-y-1.5">
               <Label>Brand</Label>
               <Combobox
                 id="asset-brand"
@@ -308,6 +308,18 @@ export default function AssetEditScreen() {
                 onChange={(v) => set('brand', v)}
                 options={brandOptions}
                 placeholder="Pilih brand"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Size</Label>
+              <Combobox
+                id="asset-size"
+                title="Pilih Size"
+                value={form.size}
+                onChange={(v) => set('size', v)}
+                options={sizeOptions}
+                placeholder="Pilih size"
               />
             </div>
 
@@ -328,12 +340,12 @@ export default function AssetEditScreen() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Nomor PO</Label>
+              <Label>Purchase Order</Label>
               <div className="flex gap-2">
                 <Input
                   value={form.poNo}
                   onChange={(e) => set('poNo', e.target.value)}
-                  placeholder="Nomor PO"
+                  placeholder="Purchase Order"
                 />
                 <Button type="button" variant="outline" onClick={() => setPoOpen(true)}>
                   <Search className="h-4 w-4" /> Cari
@@ -342,7 +354,7 @@ export default function AssetEditScreen() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Tanggal PO</Label>
+              <Label>PO Date</Label>
               <Input type="date" value={form.poDate} readOnly disabled />
             </div>
 

@@ -119,14 +119,19 @@ export default function AssetDetailScreen() {
                 <ArrowLeft className="h-4 w-4" /> Kembali
               </Link>
             </Button>
-            <Button asChild>
-              <Link to={`/assets/${encodeURIComponent(asset.AssetID)}/edit`}>
-                <Pencil className="h-4 w-4" /> Edit
-              </Link>
-            </Button>
+            {/* Hide Edit when the user lacks update rights (isUpdate===0); show
+                it when unknown so a flag-load hiccup never blocks editing. */}
+            {asset.isUpdate !== 0 && (
+              <Button asChild>
+                <Link to={`/assets/${encodeURIComponent(asset.AssetID)}/edit`}>
+                  <Pencil className="h-4 w-4" /> Edit
+                </Link>
+              </Button>
+            )}
             <AssetActionsMenu
               asset={asset}
               onChanged={() => setReloadKey((k) => k + 1)}
+              hideNav
               trigger={
                 <Button variant="outline" size="icon" aria-label="Aksi lainnya">
                   <MoreVertical className="h-4 w-4" />

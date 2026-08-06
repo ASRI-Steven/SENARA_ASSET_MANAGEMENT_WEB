@@ -82,6 +82,15 @@ test.describe('auth', () => {
     await expect(page).toHaveURL(/\/dashboard$/)
     await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
     await expect(page.getByText(USER_NAME, { exact: false }).first()).toBeVisible()
+
+    // Regression: the persisted session must survive SEVERAL rapid reloads
+    // (mimics a Vite HMR full-reload storm that used to reset the store to
+    // 'unknown' and bounce the user to /login mid-check). Never land on /login.
+    for (let i = 0; i < 3; i++) {
+      await page.reload()
+      await expect(page).toHaveURL(/\/dashboard$/)
+    }
+    await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
   })
 
   test('auth-logout-from-account: returns to login and re-guards protected routes', async ({

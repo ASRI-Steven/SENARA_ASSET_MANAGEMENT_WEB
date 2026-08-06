@@ -59,6 +59,16 @@ interface FormState {
 
 const EMPTY: FormState = { nik: '', group: '' }
 
+/**
+ * The Group Access stored procedures (usp_CMS_AssetGroupAccess_*) are not
+ * deployed to the dev database, so the BFF returns a "Could not find stored
+ * procedure" error. Detect that so we show a clear "feature unavailable" notice
+ * instead of a scary red load error.
+ */
+function isMissingSp(msg: string | null | undefined): boolean {
+  return !!msg && /could not find stored procedure/i.test(msg)
+}
+
 export default function GroupAccessScreen() {
   const [searchInput, setSearchInput] = useState('')
   const [keyword, setKeyword] = useState('')
@@ -197,7 +207,7 @@ export default function GroupAccessScreen() {
     }
   }
 
-  const colSpan = 6
+  const colSpan = 5
 
   return (
     <>
@@ -231,7 +241,21 @@ export default function GroupAccessScreen() {
         />
       </div>
 
-      {error ? (
+      {error && isMissingSp(error) ? (
+        <Card className="border-0 shadow-sm">
+          <CardContent className="flex flex-col items-center gap-3 p-10 text-center">
+            <AlertCircle className="h-8 w-8 text-amber-500" />
+            <div>
+              <p className="text-sm font-medium text-foreground">Fitur belum tersedia</p>
+              <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                Stored procedure Group Access (<code>usp_CMS_AssetGroupAccess_*</code>) belum
+                di-deploy di database ini, jadi data belum bisa dimuat. Hubungi admin database
+                untuk menambahkannya.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : error ? (
         <Card className="border-0 shadow-sm">
           <CardContent className="flex flex-col items-center gap-3 p-10 text-center">
             <AlertCircle className="h-8 w-8 text-destructive" />
@@ -249,7 +273,6 @@ export default function GroupAccessScreen() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-12">#</TableHead>
                 <TableHead className="w-32">NIK</TableHead>
                 <TableHead>Nama</TableHead>
                 <TableHead>Departemen</TableHead>
@@ -273,9 +296,8 @@ export default function GroupAccessScreen() {
                   </TableCell>
                 </TableRow>
               ) : (
-                data.map((r, i) => (
+                data.map((r) => (
                   <TableRow key={r.IDX_T_AssetGroup}>
-                    <TableCell className="text-muted-foreground">{i + 1}</TableCell>
                     <TableCell className="tabular-nums text-muted-foreground">
                       {String(r.NIK).trim()}
                     </TableCell>
@@ -324,7 +346,7 @@ export default function GroupAccessScreen() {
         </Card>
       )}
 
-      {lookupsError && (
+      {lookupsError && !isMissingSp(lookupsError) && !isMissingSp(error) && (
         <p className="mt-3 text-xs text-destructive">Gagal memuat pilihan: {lookupsError}</p>
       )}
 

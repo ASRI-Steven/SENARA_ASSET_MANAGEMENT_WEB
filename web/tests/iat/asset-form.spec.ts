@@ -25,12 +25,17 @@ function guardNoAssetWrite(page: Page): () => boolean {
   return () => wrote
 }
 
-// New-Asset Radix selects in DOM order.
+// New-Asset Radix selects. The <Label> isn't wired to the Radix trigger. In the
+// legacy-matched two-column layout, Management + Company are the first two selects
+// in the left column (stable order, before the User combobox), so they're taken by
+// DOM order. Type + Color sit in the right column interleaved with Comboboxes
+// (Model/Brand/Size), so DOM order there is not stable — address them by the
+// placeholder text their SelectValue renders while empty ("Pilih type"/"Pilih color").
 const NEW = {
   management: (p: Page) => p.getByRole('combobox').nth(0),
   company: (p: Page) => p.getByRole('combobox').nth(1),
-  type: (p: Page) => p.getByRole('combobox').nth(2),
-  color: (p: Page) => p.getByRole('combobox').nth(3),
+  type: (p: Page) => p.getByRole('combobox').filter({ hasText: 'Pilih type' }).first(),
+  color: (p: Page) => p.getByRole('combobox').filter({ hasText: 'Pilih color' }).first(),
 }
 
 test.describe('new asset (create)', () => {
@@ -46,7 +51,7 @@ test.describe('new asset (create)', () => {
     await page.goto('/assets/new')
     await lookupsCall
 
-    await expect(page.getByRole('heading', { name: 'Tambah Aset' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Add Asset' })).toBeVisible()
 
     // Management select populates from the real SP (22 real managements).
     await NEW.management(page).click()
@@ -65,7 +70,7 @@ test.describe('new asset (create)', () => {
     page,
   }) => {
     await page.goto('/assets/new')
-    await expect(page.getByRole('heading', { name: 'Tambah Aset' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Add Asset' })).toBeVisible()
 
     // Company select is disabled with a "pick management first" placeholder.
     const company = NEW.company(page)
@@ -89,7 +94,7 @@ test.describe('new asset (create)', () => {
     page,
   }) => {
     await page.goto('/assets/new')
-    await expect(page.getByRole('heading', { name: 'Tambah Aset' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Add Asset' })).toBeVisible()
 
     // Model combobox (a button) is disabled until a type is selected.
     const model = page.getByRole('button', { name: 'Pilih Model' })
@@ -109,7 +114,7 @@ test.describe('new asset (create)', () => {
 
   test('new-asset-searchable-user: user picker filters ~2000 real users', async ({ page }) => {
     await page.goto('/assets/new')
-    await expect(page.getByRole('heading', { name: 'Tambah Aset' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Add Asset' })).toBeVisible()
 
     await page.getByRole('button', { name: 'Pilih User' }).click()
     const search = page.getByPlaceholder('Cari…')
@@ -122,10 +127,10 @@ test.describe('new asset (create)', () => {
 
   test('new-asset-po-search: PO dialog searches a real PO and lists it', async ({ page }) => {
     await page.goto('/assets/new')
-    await expect(page.getByRole('heading', { name: 'Tambah Aset' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Add Asset' })).toBeVisible()
 
-    // Open the PO search dialog via the "Cari" button next to the PO field.
-    await page.getByRole('button', { name: 'Cari' }).click()
+    // Open the PO search dialog via the "Cari PO" button next to the PO field.
+    await page.getByRole('button', { name: 'Cari PO' }).click()
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByRole('heading', { name: 'Cari PO' })).toBeVisible()
 
@@ -145,12 +150,12 @@ test.describe('new asset (create)', () => {
   }) => {
     const noWrite = guardNoAssetWrite(page)
     await page.goto('/assets/new')
-    await expect(page.getByRole('heading', { name: 'Tambah Aset' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Add Asset' })).toBeVisible()
 
     // Submit with an empty form → inline errors + an error toast, no POST.
-    await page.getByRole('button', { name: 'Simpan' }).click()
-    await expect(page.getByText('Management wajib dipilih')).toBeVisible()
-    await expect(page.getByText('Unit Price wajib diisi')).toBeVisible()
+    await page.getByRole('button', { name: 'Save' }).click()
+    await expect(page.getByText('Managed By required')).toBeVisible()
+    await expect(page.getByText('Unit Price required')).toBeVisible()
     await expect(page.locator('[data-sonner-toast]').first()).toBeVisible()
     expect(noWrite()).toBe(false)
   })
@@ -170,18 +175,16 @@ test.describe('asset edit', () => {
     await openRealAsset(page)
     await page.getByRole('link', { name: 'Edit' }).click()
     await expect(page).toHaveURL(new RegExp(`/assets/${REAL_ASSET_ID}/edit$`))
-    await expect(
-      page.getByRole('heading', { name: new RegExp(`Edit ${REAL_ASSET_ID}`) }),
-    ).toBeVisible()
+    // Legacy title is "Edit Asset"; the AssetID + barcode render in the subheader.
+    await expect(page.getByRole('heading', { name: 'Edit Asset' })).toBeVisible()
+    await expect(page.getByText(REAL_ASSET_ID, { exact: false }).first()).toBeVisible()
 
     // Read-only info from the live SP (this asset: Company GARUDA ADHIMATRA).
-    await expect(page.getByText('Informasi (read-only)')).toBeVisible()
     await expect(
       page.getByText('PT. GARUDA ADHIMATRA INDONESIA', { exact: false }).first(),
     ).toBeVisible()
 
-    // Editable section present with the Model/Size/Brand pickers.
-    await expect(page.getByText('Dapat diedit')).toBeVisible()
+    // Editable fields present with the Model/Size/Brand pickers.
     await expect(page.getByRole('button', { name: 'Pilih Model' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Pilih Size' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Pilih Brand' })).toBeVisible()
@@ -196,9 +199,7 @@ test.describe('asset edit', () => {
     page,
   }) => {
     await page.goto(`/assets/${REAL_ASSET_ID}/edit`)
-    await expect(
-      page.getByRole('heading', { name: new RegExp(`Edit ${REAL_ASSET_ID}`) }),
-    ).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('heading', { name: 'Edit Asset' })).toBeVisible({ timeout: 15_000 })
 
     // Open the Size picker — a searchable dialog with real size options.
     await page.getByRole('button', { name: 'Pilih Size' }).click()
@@ -207,19 +208,19 @@ test.describe('asset edit', () => {
     await page.keyboard.press('Escape')
   })
 
-  test('asset-edit-submit-is-ui-only: valid submit shows toast, no PATCH write', async ({
+  test('asset-edit-update-button-present: valid form exposes Update; write is not exercised', async ({
     page,
   }) => {
     const noWrite = guardNoAssetWrite(page)
     await page.goto(`/assets/${REAL_ASSET_ID}/edit`)
-    await expect(
-      page.getByRole('heading', { name: new RegExp(`Edit ${REAL_ASSET_ID}`) }),
-    ).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('heading', { name: 'Edit Asset' })).toBeVisible({ timeout: 15_000 })
 
-    // Unit Price is prefilled (real value) so the form is valid; submit is UI-only
-    // by design and must NOT fire the PATCH.
-    await page.getByRole('button', { name: 'Simpan' }).click()
-    await expect(page.locator('[data-sonner-toast]').first()).toBeVisible()
+    // The real Update PATCH now writes to the shared dev DB, so the automated test
+    // stays UI-level: it asserts the Update button is present + enabled but never
+    // clicks it (per IAT safety). No write leaves the browser.
+    const update = page.getByRole('button', { name: 'Update' })
+    await expect(update).toBeVisible()
+    await expect(update).toBeEnabled()
     expect(noWrite()).toBe(false)
   })
 })

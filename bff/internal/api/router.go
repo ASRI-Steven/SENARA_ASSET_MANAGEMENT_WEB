@@ -25,6 +25,10 @@ func NewRouter(s *Service, spaOrigin string) http.Handler {
 	r.Post("/api/auth/logout", s.handleLogout)
 	r.Get("/api/auth/check", s.handleCheck)
 
+	// Bulk/single asset-user return: custom handler (see handleReturn) — loops the
+	// single-asset return SP because the CSV multi-return SP is in a different DB.
+	r.Post("/api/assets/return", s.handleReturn)
+
 	// Registry-driven data endpoints
 	for _, ep := range endpoints() {
 		r.MethodFunc(ep.method, ep.path, s.makeHandler(ep))

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Save, Loader2, Search } from 'lucide-react'
+import { RefreshCw, Save, Loader2, Search, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -15,8 +15,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
 import { Combobox, dedupeOptions, type ComboboxOption } from '@/components/ui/combobox'
 import { cn } from '@/lib/utils'
+import { saveMaster } from '@/api/master'
 import {
   fetchAssetFormLookups,
   fetchCompaniesByManagement,
@@ -28,10 +36,6 @@ import {
   type POMaterialLine,
 } from '@/api/assetForm'
 import { PoSearchDialog } from './PoSearchDialog'
-
-// Per IAT safety, the final create POST is disabled by default. Flip to true only
-// for a deliberate real write.
-const ALLOW_REAL_SUBMIT = false
 
 function today(): string {
   return new Date().toISOString().slice(0, 10)
@@ -79,18 +83,18 @@ const EMPTY: FormState = {
 function validate(f: FormState): Partial<Record<keyof FormState, string>> {
   const e: Partial<Record<keyof FormState, string>> = {}
   const req: [keyof FormState, string][] = [
-    ['management', 'Management wajib dipilih'],
-    ['company', 'Company wajib dipilih'],
-    ['type', 'Type wajib dipilih'],
-    ['model', 'Model wajib dipilih'],
-    ['color', 'Color wajib dipilih'],
-    ['size', 'Size wajib dipilih'],
-    ['brand', 'Brand wajib dipilih'],
-    ['user', 'User wajib dipilih'],
-    ['location', 'Location wajib dipilih'],
-    ['status', 'Status wajib dipilih'],
-    ['currency', 'Currency wajib dipilih'],
-    ['unitPrice', 'Unit Price wajib diisi'],
+    ['management', 'Managed By required'],
+    ['company', 'Company required'],
+    ['user', 'User required'],
+    ['location', 'Location required'],
+    ['status', 'Status required'],
+    ['type', 'Type required'],
+    ['model', 'Model required'],
+    ['color', 'Color required'],
+    ['size', 'Size required'],
+    ['brand', 'Brand required'],
+    ['currency', 'Currency required'],
+    ['unitPrice', 'Unit Price required'],
   ]
   for (const [k, msg] of req) {
     if (!String(f[k]).trim()) e[k] = msg
@@ -111,6 +115,7 @@ export default function AssetNewScreen() {
   const [lookups, setLookups] = useState<AssetFormLookups | null>(null)
   const [lookupsLoading, setLookupsLoading] = useState(true)
   const [lookupsError, setLookupsError] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
 
   const [companies, setCompanies] = useState<CompanyOption[]>([])
   const [companyLoading, setCompanyLoading] = useState(false)
@@ -118,12 +123,22 @@ export default function AssetNewScreen() {
   const [poOpen, setPoOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
+  // Quick-add dialogs (mirror the legacy inline "+" New Model / Brand / Size).
+  const [modelDialog, setModelDialog] = useState(false)
+  const [brandDialog, setBrandDialog] = useState(false)
+  const [sizeDialog, setSizeDialog] = useState(false)
+  const [newModelType, setNewModelType] = useState('')
+  const [newModel, setNewModel] = useState('')
+  const [newBrand, setNewBrand] = useState('')
+  const [newSize, setNewSize] = useState('')
+  const [quickSaving, setQuickSaving] = useState(false)
+
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((prev) => ({ ...prev, [key]: value }))
     setErrors((prev) => ({ ...prev, [key]: undefined }))
   }
 
-  // Load all lookups once.
+  // Load all lookups once (and on quick-add to pick up new options).
   useEffect(() => {
     let alive = true
     setLookupsLoading(true)
@@ -141,7 +156,7 @@ export default function AssetNewScreen() {
     return () => {
       alive = false
     }
-  }, [])
+  }, [reloadKey])
 
   // Cascade: reload companies when management changes; clear company.
   useEffect(() => {
@@ -211,6 +226,77 @@ export default function AssetNewScreen() {
     toast.success('PO diterapkan')
   }
 
+  // Legacy Cancel = clear the form back to defaults (refresh icon).
+  function clear() {
+    setForm(EMPTY)
+    setErrors({})
+  }
+
+  async function quickAddModel() {
+    if (!newModelType) {
+      toast.error('Type wajib dipilih')
+      return
+    }
+    if (!newModel.trim()) {
+      toast.error('Model wajib diisi')
+      return
+    }
+    setQuickSaving(true)
+    try {
+      const msg = await saveMaster('model', {
+        IDX_M_AssetType: Number(newModelType),
+        AssetTypeModelName: newModel.trim(),
+      })
+      toast.success(msg || 'Model ditambahkan')
+      setModelDialog(false)
+      setNewModel('')
+      setNewModelType('')
+      setReloadKey((k) => k + 1)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Gagal menyimpan model')
+    } finally {
+      setQuickSaving(false)
+    }
+  }
+
+  async function quickAddBrand() {
+    if (!newBrand.trim()) {
+      toast.error('Brand wajib diisi')
+      return
+    }
+    setQuickSaving(true)
+    try {
+      const msg = await saveMaster('brand', { AssetBrandName: newBrand.trim() })
+      toast.success(msg || 'Brand ditambahkan')
+      setBrandDialog(false)
+      setNewBrand('')
+      setReloadKey((k) => k + 1)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Gagal menyimpan brand')
+    } finally {
+      setQuickSaving(false)
+    }
+  }
+
+  async function quickAddSize() {
+    if (!newSize.trim()) {
+      toast.error('Size wajib diisi')
+      return
+    }
+    setQuickSaving(true)
+    try {
+      const msg = await saveMaster('size', { AssetSizeName: newSize.trim() })
+      toast.success(msg || 'Size ditambahkan')
+      setSizeDialog(false)
+      setNewSize('')
+      setReloadKey((k) => k + 1)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Gagal menyimpan size')
+    } finally {
+      setQuickSaving(false)
+    }
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault()
     const errs = validate(form)
@@ -239,13 +325,6 @@ export default function AssetNewScreen() {
       AssetDate: form.assetDate,
     }
 
-    if (!ALLOW_REAL_SUBMIT) {
-      // IAT safety: form validated, payload assembled, but the real create POST
-      // is disabled so automated tests never write a live asset.
-      toast.success('Form tervalidasi (submit ke backend dinonaktifkan untuk IAT)')
-      return
-    }
-
     setSubmitting(true)
     try {
       const msg = await createAsset(payload)
@@ -261,7 +340,7 @@ export default function AssetNewScreen() {
   if (lookupsError) {
     return (
       <>
-        <PageHeader title="Tambah Aset" description="Buat aset baru" />
+        <PageHeader title="Add Asset" description="Buat aset baru" />
         <Card className="border-0 shadow-sm">
           <CardContent className="flex flex-col items-center gap-3 p-10 text-center">
             <p className="text-sm font-medium text-foreground">Gagal memuat data pilihan</p>
@@ -280,31 +359,27 @@ export default function AssetNewScreen() {
   return (
     <form onSubmit={submit}>
       <PageHeader
-        title="Tambah Aset"
+        title="Add Asset"
         description="Buat aset baru"
         action={
           <div className="flex gap-2">
-            <Button asChild variant="outline" type="button">
-              <Link to="/assets">
-                <ArrowLeft className="h-4 w-4" /> Kembali
-              </Link>
+            <Button type="button" variant="outline" onClick={clear} disabled={submitting}>
+              <RefreshCw className="h-4 w-4" /> Cancel
             </Button>
             <Button type="submit" disabled={submitting}>
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Simpan
+              Save
             </Button>
           </div>
         }
       />
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Klasifikasi */}
-        <Card className="border-0 shadow-sm">
-          <CardContent className="grid gap-4 p-5 sm:grid-cols-2">
-            <h3 className="text-sm font-semibold text-foreground sm:col-span-2">Klasifikasi</h3>
-
+      <Card className="border-0 shadow-sm">
+        <CardContent className="grid gap-x-6 gap-y-4 p-5 lg:grid-cols-2">
+          {/* Left column: Managed By, Company, User, Location, Status, Purchase Order, Remarks */}
+          <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label>Management</Label>
+              <Label>Managed By</Label>
               <Select
                 value={form.management}
                 onValueChange={(v) => {
@@ -357,99 +432,6 @@ export default function AssetNewScreen() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Type</Label>
-              <Select
-                value={form.type}
-                onValueChange={(v) => {
-                  set('type', v)
-                  set('model', '')
-                }}
-                disabled={disabled}
-              >
-                <SelectTrigger className={cn(errors.type && 'border-destructive')}>
-                  <SelectValue placeholder={disabled ? 'Memuat…' : 'Pilih type'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {lookups?.types.map((t) => (
-                    <SelectItem key={t.IDX_M_AssetType} value={String(t.IDX_M_AssetType)}>
-                      {t.AssetTypeName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Err msg={errors.type} />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Model</Label>
-              <Combobox
-                id="asset-model"
-                title="Pilih Model"
-                value={form.model}
-                onChange={(v) => set('model', v)}
-                options={modelOptions}
-                disabled={disabled || !form.type}
-                placeholder={!form.type ? 'Pilih type dulu' : 'Pilih model'}
-                className={cn(errors.model && 'border-destructive')}
-              />
-              <Err msg={errors.model} />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Color</Label>
-              <Select value={form.color} onValueChange={(v) => set('color', v)} disabled={disabled}>
-                <SelectTrigger className={cn(errors.color && 'border-destructive')}>
-                  <SelectValue placeholder={disabled ? 'Memuat…' : 'Pilih color'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {lookups?.colors.map((c) => (
-                    <SelectItem key={c.IDX_M_AssetColor} value={String(c.IDX_M_AssetColor)}>
-                      {c.AssetColorName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Err msg={errors.color} />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Size</Label>
-              <Combobox
-                id="asset-size"
-                title="Pilih Size"
-                value={form.size}
-                onChange={(v) => set('size', v)}
-                options={sizeOptions}
-                disabled={disabled}
-                placeholder="Pilih size"
-                className={cn(errors.size && 'border-destructive')}
-              />
-              <Err msg={errors.size} />
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>Brand</Label>
-              <Combobox
-                id="asset-brand"
-                title="Pilih Brand"
-                value={form.brand}
-                onChange={(v) => set('brand', v)}
-                options={brandOptions}
-                disabled={disabled}
-                placeholder="Pilih brand"
-                className={cn(errors.brand && 'border-destructive')}
-              />
-              <Err msg={errors.brand} />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Penempatan */}
-        <Card className="border-0 shadow-sm">
-          <CardContent className="grid gap-4 p-5 sm:grid-cols-2">
-            <h3 className="text-sm font-semibold text-foreground sm:col-span-2">Penempatan</h3>
-
-            <div className="space-y-1.5 sm:col-span-2">
               <Label>User</Label>
               <Combobox
                 id="asset-user"
@@ -503,44 +485,163 @@ export default function AssetNewScreen() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Tanggal Aset</Label>
-              <Input
-                type="date"
-                value={form.assetDate}
-                onChange={(e) => set('assetDate', e.target.value)}
-                disabled={disabled}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Pembelian */}
-        <Card className="border-0 shadow-sm lg:col-span-2">
-          <CardContent className="grid gap-4 p-5 sm:grid-cols-2">
-            <h3 className="text-sm font-semibold text-foreground sm:col-span-2">Pembelian</h3>
-
-            <div className="space-y-1.5">
-              <Label>Nomor PO (opsional)</Label>
-              <div className="flex gap-2">
+              <Label>Purchase Order</Label>
+              <div className="grid grid-cols-[1fr_auto] gap-2">
                 <Input
                   value={form.poNo}
                   onChange={(e) => set('poNo', e.target.value)}
-                  placeholder="Nomor PO"
+                  placeholder="Purchase Order"
                 />
                 <Button
                   type="button"
                   variant="outline"
+                  size="icon"
+                  aria-label="Cari PO"
                   onClick={() => setPoOpen(true)}
                   disabled={disabled}
                 >
-                  <Search className="h-4 w-4" /> Cari
+                  <Search className="h-4 w-4" />
                 </Button>
+                <Input type="date" value={form.poDate} readOnly disabled className="col-span-2" />
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <Label>Tanggal PO</Label>
-              <Input type="date" value={form.poDate} readOnly disabled />
+              <Label>Remarks</Label>
+              <Textarea
+                value={form.remarks}
+                onChange={(e) => set('remarks', e.target.value)}
+                rows={2}
+                disabled={disabled}
+              />
+            </div>
+          </div>
+
+          {/* Right column: Type, Model, Brand, Color, Size, Currency, Asset Date, Unit Price */}
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Type</Label>
+              <Select
+                value={form.type}
+                onValueChange={(v) => {
+                  set('type', v)
+                  set('model', '')
+                }}
+                disabled={disabled}
+              >
+                <SelectTrigger className={cn(errors.type && 'border-destructive')}>
+                  <SelectValue placeholder={disabled ? 'Memuat…' : 'Pilih type'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {lookups?.types.map((t) => (
+                    <SelectItem key={t.IDX_M_AssetType} value={String(t.IDX_M_AssetType)}>
+                      {t.AssetTypeName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Err msg={errors.type} />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Model</Label>
+              <div className="grid grid-cols-[1fr_auto] gap-2">
+                <Combobox
+                  id="asset-model"
+                  title="Pilih Model"
+                  value={form.model}
+                  onChange={(v) => set('model', v)}
+                  options={modelOptions}
+                  disabled={disabled || !form.type}
+                  placeholder={!form.type ? 'Pilih type dulu' : 'Pilih model'}
+                  className={cn(errors.model && 'border-destructive')}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  aria-label="New Model"
+                  onClick={() => {
+                    setNewModelType(form.type)
+                    setModelDialog(true)
+                  }}
+                  disabled={disabled}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+              <Err msg={errors.model} />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Brand</Label>
+              <div className="grid grid-cols-[1fr_auto] gap-2">
+                <Combobox
+                  id="asset-brand"
+                  title="Pilih Brand"
+                  value={form.brand}
+                  onChange={(v) => set('brand', v)}
+                  options={brandOptions}
+                  disabled={disabled}
+                  placeholder="Pilih brand"
+                  className={cn(errors.brand && 'border-destructive')}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  aria-label="New Brand"
+                  onClick={() => setBrandDialog(true)}
+                  disabled={disabled}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+              <Err msg={errors.brand} />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Color</Label>
+              <Select value={form.color} onValueChange={(v) => set('color', v)} disabled={disabled}>
+                <SelectTrigger className={cn(errors.color && 'border-destructive')}>
+                  <SelectValue placeholder={disabled ? 'Memuat…' : 'Pilih color'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {lookups?.colors.map((c) => (
+                    <SelectItem key={c.IDX_M_AssetColor} value={String(c.IDX_M_AssetColor)}>
+                      {c.AssetColorName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Err msg={errors.color} />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Size</Label>
+              <div className="grid grid-cols-[1fr_auto] gap-2">
+                <Combobox
+                  id="asset-size"
+                  title="Pilih Size"
+                  value={form.size}
+                  onChange={(v) => set('size', v)}
+                  options={sizeOptions}
+                  disabled={disabled}
+                  placeholder="Pilih size"
+                  className={cn(errors.size && 'border-destructive')}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  aria-label="New Size"
+                  onClick={() => setSizeDialog(true)}
+                  disabled={disabled}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+              <Err msg={errors.size} />
             </div>
 
             <div className="space-y-1.5">
@@ -561,6 +662,16 @@ export default function AssetNewScreen() {
             </div>
 
             <div className="space-y-1.5">
+              <Label>Asset Date</Label>
+              <Input
+                type="date"
+                value={form.assetDate}
+                onChange={(e) => set('assetDate', e.target.value)}
+                disabled={disabled}
+              />
+            </div>
+
+            <div className="space-y-1.5">
               <Label>Unit Price</Label>
               <Input
                 inputMode="numeric"
@@ -572,19 +683,9 @@ export default function AssetNewScreen() {
               />
               <Err msg={errors.unitPrice} />
             </div>
-
-            <div className="space-y-1.5 sm:col-span-2">
-              <Label>Remarks</Label>
-              <Textarea
-                value={form.remarks}
-                onChange={(e) => set('remarks', e.target.value)}
-                rows={2}
-                disabled={disabled}
-              />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <PoSearchDialog
         open={poOpen}
@@ -592,6 +693,104 @@ export default function AssetNewScreen() {
         initialPONo={form.poNo}
         onSelect={onPoSelect}
       />
+
+      {/* New Model quick-add */}
+      <Dialog open={modelDialog} onOpenChange={setModelDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New Model</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Type</Label>
+              <Select value={newModelType} onValueChange={setNewModelType}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {lookups?.types.map((t) => (
+                    <SelectItem key={t.IDX_M_AssetType} value={String(t.IDX_M_AssetType)}>
+                      {t.AssetTypeName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Model</Label>
+              <Input value={newModel} onChange={(e) => setNewModel(e.target.value)} autoFocus />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={quickSaving}
+              onClick={() => setModelDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="button" disabled={quickSaving} onClick={quickAddModel}>
+              {quickSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* New Brand quick-add */}
+      <Dialog open={brandDialog} onOpenChange={setBrandDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New Brand</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label>Brand</Label>
+            <Input value={newBrand} onChange={(e) => setNewBrand(e.target.value)} autoFocus />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={quickSaving}
+              onClick={() => setBrandDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="button" disabled={quickSaving} onClick={quickAddBrand}>
+              {quickSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* New Size quick-add */}
+      <Dialog open={sizeDialog} onOpenChange={setSizeDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New Size</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label>Size</Label>
+            <Input value={newSize} onChange={(e) => setNewSize(e.target.value)} autoFocus />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={quickSaving}
+              onClick={() => setSizeDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button type="button" disabled={quickSaving} onClick={quickAddSize}>
+              {quickSaving && <Loader2 className="h-4 w-4 animate-spin" />}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </form>
   )
 }

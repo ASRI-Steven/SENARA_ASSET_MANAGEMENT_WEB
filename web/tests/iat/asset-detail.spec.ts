@@ -15,7 +15,11 @@ test.describe('asset detail', () => {
     test.skip(testInfo.project.name !== 'desktop', 'desktop detail action buttons')
     await openRealAsset(page)
 
-    await expect(page.getByRole('heading', { name: REAL_ASSET_ID })).toBeVisible()
+    // The detail SP (POST /api/asset/search) is a keyword scan over ~28k assets
+    // (~3s live), so the heading can lag behind navigation — allow for it.
+    await expect(page.getByRole('heading', { name: REAL_ASSET_ID })).toBeVisible({
+      timeout: 15_000,
+    })
 
     // QR rendered as an svg.
     await expect(page.locator('svg').first()).toBeVisible()
@@ -71,9 +75,18 @@ test.describe('asset detail', () => {
       }
     })
 
-    await page.getByRole('link', { name: 'Edit' }).click()
+    // Edit only renders once the detail SP (~3s live) resolves; wait for it, then
+    // route. The edit form then re-fetches the asset, so its content can lag too.
+    const editLink = page.getByRole('link', { name: 'Edit' })
+    await expect(editLink).toBeVisible({ timeout: 15_000 })
+    await editLink.click()
     await expect(page).toHaveURL(new RegExp(`/assets/${REAL_ASSET_ID}/edit$`))
-    await expect(page.getByRole('heading', { name: new RegExp(`Edit ${REAL_ASSET_ID}`) })).toBeVisible()
+    // The legacy screen titles the header "EDIT ASSET" and shows the Asset ID
+    // (with its barcode) in the subheader — not "Edit {id}" as the heading.
+    await expect(page.getByRole('heading', { name: 'Edit Asset' })).toBeVisible({
+      timeout: 15_000,
+    })
+    await expect(page.getByText(REAL_ASSET_ID, { exact: true })).toBeVisible({ timeout: 15_000 })
     expect(writeRequest).toBe(false)
   })
 

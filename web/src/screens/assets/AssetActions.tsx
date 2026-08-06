@@ -752,11 +752,18 @@ export function AssetActionsMenu({
   asset,
   onChanged,
   trigger,
+  hideNav,
 }: {
   asset: AssetRow
   onChanged: () => void
   /** Custom trigger element; defaults to a three-dot icon button. */
   trigger?: ReactNode
+  /**
+   * Hide the "Lihat Detail" / "Edit" navigation items. Set on the detail page,
+   * where those are redundant (you're already viewing it and there's an Edit
+   * button next to this menu).
+   */
+  hideNav?: boolean
 }) {
   const navigate = useNavigate()
   const [action, setAction] = useState<ActionKind | null>(null)
@@ -795,18 +802,24 @@ export function AssetActionsMenu({
           {trigger ?? <MoreVerticalIcon />}
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
-          <DropdownMenuItem onClick={() => navigate(`/assets/${encodeURIComponent(asset.AssetID)}`)}>
-            <Eye className="h-4 w-4" /> Lihat Detail
-          </DropdownMenuItem>
-          {can(asset.isUpdate) ? (
-            <DropdownMenuItem
-              onClick={() => navigate(`/assets/${encodeURIComponent(asset.AssetID)}/edit`)}
-            >
-              <Pencil className="h-4 w-4" /> Edit
-            </DropdownMenuItem>
-          ) : null}
+          {!hideNav ? (
+            <>
+              <DropdownMenuItem
+                onClick={() => navigate(`/assets/${encodeURIComponent(asset.AssetID)}`)}
+              >
+                <Eye className="h-4 w-4" /> Lihat Detail
+              </DropdownMenuItem>
+              {can(asset.isUpdate) ? (
+                <DropdownMenuItem
+                  onClick={() => navigate(`/assets/${encodeURIComponent(asset.AssetID)}/edit`)}
+                >
+                  <Pencil className="h-4 w-4" /> Edit
+                </DropdownMenuItem>
+              ) : null}
 
-          <DropdownMenuSeparator />
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
 
           {can(asset.isAssignUser) ? (
             <DropdownMenuItem onClick={() => setAction('assign-user')}>

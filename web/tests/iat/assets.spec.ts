@@ -165,6 +165,110 @@ test.describe('assets list (desktop)', () => {
     expect(writeRequest).toBe(false)
   })
 
+  // The bulk "Return User" button is gated on the page's isReturn ACL, exactly
+  // like the legacy Datagrid. The seeded admin account's search response carries
+  // isReturn=0, so to exercise the bulk-return UI deterministically (regardless
+  // of ACL seeding) we intercept /api/assets/search and grant isReturn on the
+  // page + every row. This stays UI-level: no real write is ever sent, and the
+  // request guard below fails the test if a /api/assets/return POST leaks out.
+  async function grantReturnAcl(page: Page): Promise<void> {
+    await page.route('**/api/assets/search', async (route) => {
+      const res = await route.fetch()
+      const body = await res.json()
+      const data = body?.data as unknown[] | undefined
+      if (Array.isArray(data)) {
+        const rows = data[0] as Array<Record<string, unknown>> | undefined
+        rows?.forEach((r) => {
+          r.isReturn = 1
+        })
+        const pageAcl = data[1] as Array<Record<string, unknown>> | undefined
+        if (pageAcl?.[0]) pageAcl[0].isReturn = 1
+      }
+      await route.fulfill({ response: res, json: body })
+    })
+  }
+
+  test('assets-bulk-return: multi-select opens the Return User dialog with count + AssetIDs; no write fires', async ({
+    page,
+  }) => {
+    // Guard: this UI-level test must NEVER fire the real bulk-return POST (it
+    // would write to the shared dev DB). Fail if /api/assets/return is ever hit.
+    let returnPosted = false
+    page.on('request', (req) => {
+      if (req.method() !== 'GET' && /\/api\/assets\/return/.test(req.url())) {
+        returnPosted = true
+      }
+    })
+
+    // Grant isReturn so the bulk "Return User" action is reachable, then reload.
+    await grantReturnAcl(page)
+    await page.reload()
+
+    // The per-row + select-all checkboxes are gated on the page's isUpdate ACL,
+    // which the admin session (STEVEN ALEXANDER) is granted. Wait for real rows
+    // (the server-side grid SP can be slow under dev-DB load).
+    await expect(assetIdLink(page).first()).toBeVisible({ timeout: 15_000 })
+
+    // Read the first two AssetIDs BEFORE selecting (they appear in the dialog).
+    const id0 = (await assetIdLink(page).nth(0).textContent())?.trim() ?? ''
+    const id1 = (await assetIdLink(page).nth(1).textContent())?.trim() ?? ''
+    expect(id0).toMatch(ASSET_ID_RE)
+    expect(id1).toMatch(ASSET_ID_RE)
+
+    // Select the first two rows via their per-row checkboxes (labelled by AssetID).
+    const rowChecks = page.getByRole('checkbox', { name: /^Pilih aset / })
+    await expect(rowChecks.first()).toBeVisible()
+    await rowChecks.nth(0).check()
+    await rowChecks.nth(1).check()
+
+    // The bulk action bar reports the selection count and offers Return User.
+    await expect(page.getByText('2 aset dipilih')).toBeVisible()
+    const returnBtn = page.getByRole('button', { name: 'Return User' })
+    await expect(returnBtn).toBeVisible()
+
+    // Opening the dialog shows the Remarks field + the selected AssetIDs, and
+    // repeats the count — but we NEVER click the final "Return" confirm.
+    await returnBtn.click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByRole('heading', { name: 'Return User' })).toBeVisible()
+    await expect(dialog.getByText('Kembalikan 2 aset berikut dari user saat ini.')).toBeVisible()
+
+    // The selected AssetIDs are listed in the dialog.
+    await expect(dialog.getByText(id0, { exact: true })).toBeVisible()
+    await expect(dialog.getByText(id1, { exact: true })).toBeVisible()
+
+    // Remarks is editable.
+    const remarks = dialog.getByRole('textbox')
+    await remarks.fill('IAT ui-only check')
+    await expect(remarks).toHaveValue('IAT ui-only check')
+
+    // Dismiss WITHOUT confirming — no prod write must have fired.
+    await page.getByRole('button', { name: 'Batal' }).click()
+    await expect(dialog).toBeHidden()
+    expect(returnPosted).toBe(false)
+  })
+
+  test('assets-bulk-select-all: header checkbox selects every row on the page; Batal Pilih clears', async ({
+    page,
+  }) => {
+    // Grant isReturn so the bulk bar (which reports the count) is reachable.
+    await grantReturnAcl(page)
+    await page.reload()
+    await expect(assetIdLink(page).first()).toBeVisible({ timeout: 15_000 })
+
+    const rowChecks = page.getByRole('checkbox', { name: /^Pilih aset / })
+    const rowCount = await rowChecks.count()
+    expect(rowCount).toBeGreaterThan(1)
+
+    // The select-all header checkbox ticks every visible row.
+    await page.getByRole('checkbox', { name: 'Pilih semua aset di halaman ini' }).check()
+    await expect(page.getByText(`${rowCount} aset dipilih`)).toBeVisible()
+
+    // Batal Pilih clears the whole selection (and hides the bulk bar).
+    await page.getByRole('button', { name: 'Batal Pilih' }).click()
+    await expect(page.getByText(/aset dipilih/)).toBeHidden()
+  })
+
   test('assets-loading-skeleton: row skeleton shows before the grid data arrives', async ({
     page,
   }) => {

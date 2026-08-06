@@ -46,26 +46,27 @@ test.describe('settings navigation (desktop)', () => {
     await expect(page.getByRole('heading', { name: 'User Setting' })).toBeVisible()
   })
 
-  test('settings-master-hub-cards: Master hub surfaces a Setting section with 3 cards', async ({
+  test('settings-master-hub-no-setting-cards-desktop: hub shows only master cards; settings live in the sidebar', async ({
     page,
   }) => {
     await page.goto('/master')
-    await expect(page.getByRole('heading', { name: 'Master Data' })).toBeVisible()
+    // Legacy hub title + master-data cards only. The Setting cards do NOT appear
+    // on the desktop hub (they belong to the sidebar); they are kept only on
+    // mobile where there is no sidebar.
+    await expect(page.getByRole('heading', { name: 'Asset Master' })).toBeVisible()
 
-    // The "Setting" sub-heading + three cards (also the mobile-reachable entry).
-    // Scope to the main content region so the sidebar's setting links (same text)
-    // don't collide with the hub cards.
     const main = page.getByRole('main')
-    await expect(main.getByRole('heading', { name: 'Setting' })).toBeVisible()
-    for (const label of NAV_SETTING) {
-      // The hub card carries the "Kelola akses pengguna" hint under the label.
-      await expect(
-        main.getByRole('link').filter({ hasText: 'Kelola akses pengguna' }).filter({ hasText: label }),
-      ).toBeVisible()
-    }
+    await expect(main.getByRole('heading', { name: 'Setting' })).toBeHidden()
     await expect(
-      main.getByRole('link').filter({ hasText: 'Admin Access' }),
-    ).toHaveAttribute('href', '/settings/admin-access')
+      main.getByRole('link').filter({ hasText: 'Kelola akses pengguna' }),
+    ).toHaveCount(0)
+
+    // Settings remain reachable from the sidebar's Setting group.
+    const sidebar = page.locator('aside')
+    await expect(sidebar.getByRole('link', { name: 'Admin Access' })).toHaveAttribute(
+      'href',
+      '/settings/admin-access',
+    )
   })
 })
 
@@ -79,7 +80,8 @@ test.describe('settings: admin access (desktop)', () => {
     page,
   }) => {
     await gotoSetting(page, '/settings/admin-access')
-    await expect(page.getByRole('columnheader', { name: '#' })).toBeVisible()
+    // Legacy has no leading "#" index column.
+    await expect(page.getByRole('columnheader', { name: '#' })).toHaveCount(0)
     await expect(page.getByRole('columnheader', { name: 'NIK' })).toBeVisible()
     await expect(page.getByRole('columnheader', { name: 'Nama' })).toBeVisible()
     await expect(page.getByRole('columnheader', { name: 'Departemen' })).toBeVisible()
@@ -100,9 +102,18 @@ test.describe('settings: admin access (desktop)', () => {
     await gotoSetting(page, '/settings/admin-access')
     const search = page.getByLabel('Cari pengguna')
 
-    // A real admin (WIWIK GUNARSIH exists in the dev DB).
-    await search.fill('WIWIK')
-    await expect(page.getByRole('cell', { name: /WIWIK/ }).first()).toBeVisible({ timeout: 15_000 })
+    // Derive a real search term from the first admin row (data-independent, so
+    // it survives dev-DB changes). Name is the 2nd cell (NIK | Nama | …).
+    const firstRow = page.getByRole('row').nth(1)
+    await expect(firstRow).toBeVisible({ timeout: 15_000 })
+    const name = ((await firstRow.getByRole('cell').nth(1).textContent()) ?? '').trim()
+    const token = name.match(/[A-Za-z]{3,}/)?.[0] ?? name.slice(0, 4)
+
+    // Server-side search narrows to rows matching that real name token.
+    await search.fill(token)
+    await expect(page.getByRole('cell', { name: new RegExp(token, 'i') }).first()).toBeVisible({
+      timeout: 15_000,
+    })
 
     // Nonsense keyword → empty state.
     await search.fill('zzz-nonsense-nomatch')
@@ -141,9 +152,10 @@ test.describe('settings: admin access (desktop)', () => {
     page,
   }) => {
     await gotoSetting(page, '/settings/admin-access')
-    await page.getByLabel('Cari pengguna').fill('WIWIK')
-    const nameCell = page.getByRole('cell', { name: /WIWIK/ }).first()
-    await expect(nameCell).toBeVisible({ timeout: 15_000 })
+    // Use the first row that actually exposes an Edit action (ACL-gated), rather
+    // than a hardcoded name — robust to dev-DB data changes.
+    const editBtn = page.getByRole('button', { name: /^Ubah / }).first()
+    await expect(editBtn).toBeVisible({ timeout: 15_000 })
 
     let updateRequest = false
     page.on('request', (req) => {
@@ -159,8 +171,7 @@ test.describe('settings: admin access (desktop)', () => {
     const byNik = page.waitForResponse((r) =>
       /\/api\/settings\/admin-access\/by-nik$/.test(new URL(r.url()).pathname),
     )
-    // Open the edit pencil for the WIWIK row (aria-label "Ubah <name>").
-    await page.getByRole('button', { name: /Ubah WIWIK/i }).first().click()
+    await editBtn.click()
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByText('Ubah Akses Admin')).toBeVisible()
     await byNik
@@ -247,20 +258,25 @@ test.describe('settings: group access (desktop)', () => {
     await login(page)
   })
 
-  test('group-access-loads: screen renders header + search; degrades gracefully if SP absent', async ({
+  test('group-access-loads: resolves via the AssetICTDB pool (empty rows or data), no error', async ({
     page,
   }) => {
+    // The usp_CMS_AssetGroup* SPs live in AssetICTDB, not the primary
+    // GeneralAffairDB — the BFF routes group-access there via a 2nd connection.
+    // So the screen loads normally (no "Could not find stored procedure" error).
     await gotoSetting(page, '/settings/groups')
     await expect(page.getByRole('heading', { name: 'Group Access' })).toBeVisible()
     await expect(page.getByLabel('Cari pengguna')).toBeVisible()
 
-    // The group-access SPs are not present in the dev DB, so the screen either
-    // lists real rows OR shows its error state — both are acceptable. Assert one
-    // of the two resolves (never an infinite spinner).
-    const errorState = page.getByText('Gagal memuat data')
+    // Resolves to a real (currently empty) list or rows — never a stuck spinner.
     const emptyState = page.getByText('Tidak ada data.')
     const anyRow = page.getByRole('cell', { name: /[A-Z]{3,}/ }).first()
-    await expect(errorState.or(emptyState).or(anyRow)).toBeVisible({ timeout: 15_000 })
+    await expect(emptyState.or(anyRow)).toBeVisible({ timeout: 15_000 })
+
+    // No error states: the SP is found, so neither the red error nor the
+    // "Fitur belum tersedia" fallback should appear.
+    await expect(page.getByText('Gagal memuat data')).toBeHidden()
+    await expect(page.getByText('Fitur belum tersedia')).toBeHidden()
   })
 })
 

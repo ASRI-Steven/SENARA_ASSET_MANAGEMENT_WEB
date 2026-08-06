@@ -172,7 +172,7 @@ export default function UserRolesScreen() {
     }
   }
 
-  const colSpan = 4
+  const colSpan = 3
 
   return (
     <>
@@ -224,7 +224,6 @@ export default function UserRolesScreen() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-12">#</TableHead>
                 <TableHead className="w-40">NIK</TableHead>
                 <TableHead>Nama</TableHead>
                 <TableHead className="w-24 text-right">Aksi</TableHead>
@@ -246,9 +245,8 @@ export default function UserRolesScreen() {
                   </TableCell>
                 </TableRow>
               ) : (
-                data.map((r, i) => (
+                data.map((r) => (
                   <TableRow key={r.NIK}>
-                    <TableCell className="text-muted-foreground">{i + 1}</TableCell>
                     <TableCell className="tabular-nums text-muted-foreground">
                       {String(r.NIK).trim()}
                     </TableCell>

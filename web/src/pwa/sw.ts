@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+import { clientsClaim } from 'workbox-core'
 import { precacheAndRoute } from 'workbox-precaching'
 import { NavigationRoute, registerRoute } from 'workbox-routing'
 import { StaleWhileRevalidate } from 'workbox-strategies'
@@ -7,6 +8,12 @@ import { ExpirationPlugin } from 'workbox-expiration'
 declare let self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ url: string; revision: string | null }>
 }
+
+// autoUpdate: activate a newly-installed SW immediately and take control of all
+// open tabs, so a fresh build replaces the old precached bundle on next reload
+// (no stuck-in-"waiting" SW serving stale JS).
+self.skipWaiting()
+clientsClaim()
 
 // App-shell precache (injected at build time by vite-plugin-pwa).
 precacheAndRoute(self.__WB_MANIFEST)
@@ -42,9 +49,4 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open('offline-fallback-v1').then((cache) => cache.add('/offline.html')),
   )
-})
-
-// Apply an update only when the app asks (UpdatePrompt posts SKIP_WAITING).
-self.addEventListener('message', (event) => {
-  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting()
 })

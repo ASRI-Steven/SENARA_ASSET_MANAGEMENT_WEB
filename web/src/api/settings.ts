@@ -324,7 +324,7 @@ export async function fetchUserAccessByNIK(nik: string): Promise<FormAccess[]> {
   return rows(env)
 }
 
-/** Convert a FormAccess matrix into the compact UserAccess payload (r/i/u/d/n). */
+/** Convert a FormAccess matrix into the compact UserAccess payload (r/u/d/n). */
 export function toUserAccess(forms: FormAccess[]): UserAccessEntry[] {
   return forms.map((f) => ({
     i: f.IDX_M_Forms,
@@ -335,11 +335,30 @@ export function toUserAccess(forms: FormAccess[]): UserAccessEntry[] {
   }))
 }
 
+/**
+ * Serialise the access matrix to the XML `usp_CMS_UserASRILup_Save/Update`
+ * expects: `<root><item><i>formId</i><r/><u/><d/><n/></item>…</root>`, parsed by
+ * the SP via SP_XML_PREPAREDOCUMENT + OPENXML. Sending JSON (the BFF's default
+ * for arrays) makes the SP fail with "Invalid at the top level of the document"
+ * — so we build the XML ourselves and send it as a plain string param.
+ */
+export function userAccessXml(forms: FormAccess[]): string {
+  const items = toUserAccess(forms)
+    .map(
+      (a) =>
+        '<item>' +
+        `<i>${a.i}</i><r>${a.r}</r><u>${a.u}</u><d>${a.d}</d><n>${a.n}</n>` +
+        '</item>',
+    )
+    .join('')
+  return `<root>${items}</root>`
+}
+
 /** POST /api/settings/users {NIK,UserAccess} — create a new user's access. */
 export async function saveUserRoles(nik: string, forms: FormAccess[]): Promise<string> {
   const env = await api.post<StatusEnvelope>('/api/settings/users', {
     NIK: nik,
-    UserAccess: toUserAccess(forms),
+    UserAccess: userAccessXml(forms),
   })
   return assertStatus(env)
 }
@@ -348,7 +367,7 @@ export async function saveUserRoles(nik: string, forms: FormAccess[]): Promise<s
 export async function updateUserRoles(nik: string, forms: FormAccess[]): Promise<string> {
   const env = await api.patch<StatusEnvelope>('/api/settings/users', {
     NIK: nik,
-    UserAccess: toUserAccess(forms),
+    UserAccess: userAccessXml(forms),
   })
   return assertStatus(env)
 }

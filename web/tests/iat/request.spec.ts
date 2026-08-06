@@ -16,7 +16,7 @@ test.describe('request form (desktop)', () => {
   test('request-form-real-lookups: Company/User/Lokasi populate from real lookups', async ({
     page,
   }) => {
-    for (const label of ['Jenis Request', 'Company', 'User', 'Lokasi']) {
+    for (const label of ['Request Type', 'Company', 'User', 'Delivery Location']) {
       await expect(page.getByText(label, { exact: true })).toBeVisible()
     }
 
@@ -30,29 +30,29 @@ test.describe('request form (desktop)', () => {
     await page.getByRole('option', { name: /PT\. ALFA GOLDLAND REALTY/ }).click()
     await expect(companySelect).toContainText('PT. ALFA GOLDLAND REALTY')
 
-    // Lokasi select is populated too (e.g. "BASE 2").
+    // Delivery Location select is populated too (e.g. "BASE 2").
     const lokasiSelect = page.getByRole('combobox').nth(3)
     await lokasiSelect.click()
     await expect(page.getByRole('option', { name: 'BASE 2', exact: true })).toBeVisible()
     await page.keyboard.press('Escape')
 
-    // One item row + the send button.
-    await expect(page.getByText('Item #1')).toBeVisible()
+    // One item row (labelled "No 1") + the send button.
+    await expect(page.getByText('No 1', { exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Kirim' })).toBeVisible()
   })
 
   test('request-add-remove-item-ui-only: grows to 2 then back to 1; last delete disabled', async ({
     page,
   }) => {
-    await page.getByRole('button', { name: 'Tambah Item' }).click()
-    await expect(page.getByText('Item #2')).toBeVisible()
+    await page.getByRole('button', { name: /Add Form/ }).click()
+    await expect(page.getByText('No 2', { exact: true })).toBeVisible()
 
     // Remove the second item.
-    await page.getByRole('button', { name: 'Hapus Item #2' }).click()
-    await expect(page.getByText('Item #2')).toBeHidden()
+    await page.getByRole('button', { name: 'Hapus item 2' }).click()
+    await expect(page.getByText('No 2', { exact: true })).toBeHidden()
 
     // With a single item the remaining delete button is disabled.
-    await expect(page.getByRole('button', { name: 'Hapus Item #1' })).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Hapus item 1' })).toBeDisabled()
   })
 
   test('request-fill-and-validate-ui-only: fill real lookups, validate item, no POST', async ({
@@ -64,7 +64,7 @@ test.describe('request form (desktop)', () => {
       if (req.method() === 'POST' && /\/api\/request/i.test(req.url())) submitRequest = true
     })
 
-    // Pick Company / User / Lokasi via their real Radix selects.
+    // Pick Company / User / Delivery Location via their real Radix selects.
     await page.getByRole('combobox').nth(1).click()
     await page.getByRole('option', { name: /PT\. ALFA GOLDLAND REALTY/ }).click()
     await page.getByRole('combobox').nth(2).click()
@@ -72,13 +72,13 @@ test.describe('request form (desktop)', () => {
     await page.getByRole('combobox').nth(3).click()
     await page.getByRole('option', { name: 'BASE 2', exact: true }).click()
 
-    // Fill the item fields.
-    const name = page.getByPlaceholder('Nama item')
-    const brand = page.getByPlaceholder('Brand')
+    // Fill the item name; the per-item Brand is now a real lookup select (combobox 4).
+    const name = page.getByPlaceholder('Item Name')
     await name.fill('Laptop Dinas')
-    await brand.fill('Dell')
     await expect(name).toHaveValue('Laptop Dinas')
-    await expect(brand).toHaveValue('Dell')
+    const brand = page.getByRole('combobox').nth(4)
+    await brand.click()
+    await page.getByRole('option').first().click()
 
     // Clear the name and Kirim → validation fails (no write). This is the only
     // Kirim click and it never reaches the backend.
@@ -98,7 +98,7 @@ test.describe('request form (mobile)', () => {
     await page.goto('/request')
 
     await expect(page.getByRole('heading', { name: 'Request Form' })).toBeVisible()
-    await expect(page.getByPlaceholder('Nama item')).toBeVisible()
+    await expect(page.getByPlaceholder('Item Name')).toBeVisible()
 
     // The Company select still populates from real lookups on mobile.
     await page.getByRole('combobox').nth(1).click()

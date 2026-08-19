@@ -1,13 +1,16 @@
 import { useState } from 'react'
-import { Search, Loader2, PackageSearch } from 'lucide-react'
+import { Search, Loader2, PackageSearch, FileText } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { rupiah, toNumber } from '@/lib/format'
 import { searchPO, type POHeader, type POMaterialLine } from '@/api/assetForm'
@@ -79,29 +82,41 @@ export function PoSearchDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl gap-4">
         <DialogHeader>
-          <DialogTitle>Cari PO</DialogTitle>
+          <div className="flex items-center gap-3">
+            <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary/10 text-primary">
+              <FileText className="h-[18px] w-[18px]" />
+            </span>
+            <div>
+              <DialogTitle>Cari No. PO</DialogTitle>
+              <DialogDescription>Sumber data: ASBS-Asset</DialogDescription>
+            </div>
+          </div>
         </DialogHeader>
 
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={poNo}
-              onChange={(e) => setPoNo(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  void runSearch()
-                }
-              }}
-              placeholder="Nomor PO"
-              className="pl-9"
-            />
+        <div className="space-y-1.5">
+          <Label htmlFor="po-search">Cari dokumen PO</Label>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="po-search"
+                value={poNo}
+                onChange={(e) => setPoNo(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    void runSearch()
+                  }
+                }}
+                placeholder="Ketik No. PO / vendor / nomor BPB…"
+                className="pl-9"
+              />
+            </div>
+            <Button type="button" onClick={() => void runSearch()} disabled={loading}>
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+              Cari
+            </Button>
           </div>
-          <Button type="button" onClick={() => void runSearch()} disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-            Cari
-          </Button>
         </div>
 
         {header && (
@@ -179,6 +194,12 @@ export function PoSearchDialog({
             PO tidak ditemukan.
           </div>
         )}
+
+        <DialogFooter>
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+            Batal
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

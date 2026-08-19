@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   Search,
   SlidersHorizontal,
@@ -15,6 +15,8 @@ import {
   ArrowDownUp,
   FileDown,
   RotateCcw,
+  X,
+  Info,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -31,13 +33,6 @@ import {
   TableHead,
   TableCell,
 } from '@/components/ui/table'
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from '@/components/ui/sheet'
 import {
   Select,
   SelectContent,
@@ -58,6 +53,7 @@ import {
 } from '@/components/ui/dialog'
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox'
 import { cn } from '@/lib/utils'
+import { STICKERS_PER_A4 } from '@/lib/printQr'
 import { numberWithDots, rupiah, toNumber } from '@/lib/format'
 import { statusColorClass } from '@/lib/assetStatus'
 import {
@@ -89,7 +85,7 @@ type SortKey = 'assetId' | 'status' | 'location'
 const SORT_FIELDS: Record<SortKey, { index: number; label: string }> = {
   assetId: { index: 4, label: 'Asset ID' },
   status: { index: 1, label: 'Status' },
-  location: { index: 2, label: 'Location' },
+  location: { index: 2, label: 'Lokasi' },
 }
 const DEFAULT_SORT: { key: SortKey; dir: SortDir } = { key: 'assetId', dir: 'asc' }
 
@@ -97,8 +93,8 @@ const DEFAULT_SORT: { key: SortKey; dir: SortDir } = { key: 'assetId', dir: 'asc
 // AssetList.vue used {Assign:0, UnAssign:1}; leaving it unset returns all rows,
 // which we surface as the "Semua" option (value ALL, param omitted).
 const RETURN_ASSET_OPTIONS: { value: string; label: string }[] = [
-  { value: '0', label: 'Assigned' },
-  { value: '1', label: 'Unassigned' },
+  { value: '0', label: 'Assigned — sudah ada pemegang' },
+  { value: '1', label: 'Unassigned — belum ada pemegang' },
 ]
 
 function assetRowKey(a: AssetRow, i: number): string {
@@ -177,6 +173,7 @@ function AssetCard({ asset, onChanged }: { asset: AssetRow; onChanged: () => voi
 }
 
 export default function AssetListScreen() {
+  const navigate = useNavigate()
   // Search input (debounced into `keyword`, which drives the request).
   const [searchInput, setSearchInput] = useState('')
   const [keyword, setKeyword] = useState('')
@@ -205,10 +202,10 @@ export default function AssetListScreen() {
   const [reloadKey, setReloadKey] = useState(0)
   const [reporting, setReporting] = useState(false)
 
-  // Bulk multi-select (by IDX_M_Asset) → "Return User" action. Mirrors the
-  // legacy Datagrid: a per-row + select-all checkbox (gated on page isUpdate)
-  // driving a bulk Return User dialog (gated on page isReturn).
-  const [selected, setSelected] = useState<Set<number>>(new Set())
+  // Multi-select untuk Print QR: Map IDX_M_Asset -> AssetRow (baris LENGKAP),
+  // supaya seleksi AKUMULATIF lintas halaman DAN bisa dikirim langsung ke Print QR
+  // via router state (tanpa fetch ulang per-aset yang rawan gagal).
+  const [selected, setSelected] = useState<Map<number, AssetRow>>(new Map())
   const [returnOpen, setReturnOpen] = useState(false)
 
   function changeView(v: View) {
@@ -284,8 +281,7 @@ export default function AssetListScreen() {
         if (id !== reqId.current) return
         setData(res.rows)
         setPageInfo(res.page)
-        // A new result set invalidates any prior row selection.
-        setSelected(new Set())
+        // JANGAN clear selection di sini — biar persist saat pindah halaman.
       })
       .catch((e: unknown) => {
         if (id !== reqId.current) return
@@ -297,6 +293,12 @@ export default function AssetListScreen() {
         if (id === reqId.current) setLoading(false)
       })
   }, [searchParams, page, reloadKey])
+
+  // Reset seleksi Print QR hanya saat filter/keyword berubah (result set baru),
+  // BUKAN saat pindah halaman — supaya centang terkumpul lintas halaman.
+  useEffect(() => {
+    setSelected(new Map())
+  }, [searchParams])
 
   const maxPage = pageInfo?.MaxPage ?? 1
   const total = pageInfo?.TotalRecords ?? 0
@@ -393,7 +395,7 @@ export default function AssetListScreen() {
     if (status !== ALL) out.push(`Status: ${labelOf(statusOptions, status)}`)
     if (user !== ALL) out.push(`User: ${labelOf(userOptions, user)}`)
     if (department !== ALL) out.push(`Department: ${department}`)
-    if (location !== ALL) out.push(`Location: ${labelOf(locationOptions, location)}`)
+    if (location !== ALL) out.push(`Lokasi: ${labelOf(locationOptions, location)}`)
     if (returnAsset !== ALL)
       out.push(`Assign: ${labelOf(RETURN_ASSET_OPTIONS, returnAsset)}`)
     if (company !== ALL) out.push(`Company: ${labelOf(companyOptions, company)}`)
@@ -493,34 +495,72 @@ export default function AssetListScreen() {
     setReloadKey((k) => k + 1)
   }
 
-  // --- Bulk selection (mirrors legacy Datagrid) ---
-  // Checkboxes appear only when the page grants isUpdate; the Return User bulk
-  // action only when it grants isReturn (legacy gated both the same way).
-  const canSelect = pageInfo?.isUpdate === 1
-  const canReturn = pageInfo?.isReturn === 1
+  // --- Bulk selection ---
+  // Checkbox seleksi Print QR: tersedia untuk SEMUA user (tak digate izin).
+  const canSelect = true
+  // Bulk "Return User" tetap disembunyikan (mockup tak memilikinya).
+  const canReturn = false && pageInfo?.isReturn === 1
   const allSelected = data.length > 0 && data.every((a) => selected.has(a.IDX_M_Asset))
   const someSelected = selected.size > 0 && !allSelected
+  // Print QR wajib muat 1 halaman A4 → seleksi dibatasi kapasitas 1 A4 (16).
+  // Begitu penuh, aset yang belum dicentang tak bisa ditambah lagi (tak tumpah
+  // ke halaman ke-2, tak ada data yang kebuang).
+  const atSelectCap = selected.size >= STICKERS_PER_A4
 
-  function toggleRow(idx: number, checked: boolean) {
+  function toggleRow(a: AssetRow, checked: boolean) {
+    // Tolak penambahan bila kuota 1 halaman A4 sudah penuh.
+    if (checked && !selected.has(a.IDX_M_Asset) && selected.size >= STICKERS_PER_A4) {
+      toast.info(`Maksimal ${STICKERS_PER_A4} aset per cetak (muat 1 halaman A4).`)
+      return
+    }
     setSelected((prev) => {
-      const next = new Set(prev)
-      if (checked) next.add(idx)
-      else next.delete(idx)
+      const next = new Map(prev)
+      if (checked) next.set(a.IDX_M_Asset, a)
+      else next.delete(a.IDX_M_Asset)
       return next
     })
   }
 
-  // Select-all toggles only THIS page's rows (legacy ct_selectAll scope).
+  // Select-all: isi baris halaman ini sampai kuota A4 (16) penuh, sisanya
+  // diabaikan. Tetap PERTAHANKAN pilihan dari halaman lain (akumulatif).
   function toggleAll(checked: boolean) {
-    setSelected(checked ? new Set(data.map((a) => a.IDX_M_Asset)) : new Set())
+    setSelected((prev) => {
+      const next = new Map(prev)
+      if (checked) {
+        for (const a of data) {
+          if (next.size >= STICKERS_PER_A4) break
+          next.set(a.IDX_M_Asset, a)
+        }
+        if (next.size >= STICKERS_PER_A4 && !data.every((a) => next.has(a.IDX_M_Asset))) {
+          toast.info(`Maksimal ${STICKERS_PER_A4} aset per cetak (muat 1 halaman A4).`)
+        }
+      } else {
+        data.forEach((a) => next.delete(a.IDX_M_Asset))
+      }
+      return next
+    })
   }
 
-  // The selected rows still present in the current page — drives the dialog's
-  // AssetID list and the actual return payload (IDX_M_Asset ids).
-  const selectedRows = useMemo(
-    () => data.filter((a) => selected.has(a.IDX_M_Asset)),
-    [data, selected],
+  // Semua baris terpilih (lintas halaman) — dipakai dialog Return dormant + Print QR.
+  const selectedRows = useMemo(() => [...selected.values()], [selected])
+
+  // AssetID unik yang terpilih (lintas halaman) — untuk label tombol + fallback URL.
+  const selectedAssetIds = useMemo(
+    () => [...new Set(selectedRows.map((r) => r.AssetID.trim()))],
+    [selectedRows],
   )
+
+  // Go to Print QR — kirim baris LENGKAP via router state (fast-path, tanpa fetch
+  // ulang), plus ?ids sebagai fallback bila halaman di-refresh (state hilang).
+  function goPrintQr() {
+    if (selectedRows.length > 0) {
+      navigate('/print-qr?ids=' + encodeURIComponent(selectedAssetIds.join(',')), {
+        state: { assets: selectedRows },
+      })
+    } else {
+      navigate('/print-qr')
+    }
+  }
 
   return (
     <>
@@ -533,24 +573,24 @@ export default function AssetListScreen() {
               variant="outline"
               onClick={handlePrintReport}
               disabled={reporting}
-              aria-label="Cetak laporan PDF"
+              aria-label="Export"
             >
               {reporting ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <FileDown className="h-4 w-4" />
               )}
-              <span className="hidden sm:inline">Cetak Laporan</span>
+              <span className="hidden sm:inline">Export</span>
             </Button>
             <Button asChild variant="outline">
               <Link to="/print-qr">
-                <QrCode className="h-4 w-4" /> Print QR
+                <QrCode className="h-4 w-4" /> PRINT QR
               </Link>
             </Button>
             {pageInfo?.isNew ? (
               <Button asChild>
                 <Link to="/assets/new">
-                  <Plus className="h-4 w-4" /> Tambah Aset
+                  <Plus className="h-4 w-4" /> NEW ASSET
                 </Link>
               </Button>
             ) : null}
@@ -565,123 +605,38 @@ export default function AssetListScreen() {
           <Input
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Cari AssetID, model, user…"
+            placeholder="Cari Asset ID / nama / NIK / No. PO…"
             className="pl-9"
           />
         </div>
 
-        <Sheet open={filterOpen} onOpenChange={setFilterOpen}>
-          <SheetTrigger asChild>
-            <Button variant="outline" className="shrink-0">
-              <SlidersHorizontal className="h-4 w-4" />
-              <span className="hidden sm:inline">Filter</span>
-              {activeFilters > 0 && <Badge className="ml-1 h-5 min-w-5 px-1">{activeFilters}</Badge>}
-            </Button>
-          </SheetTrigger>
-          <SheetContent className="flex flex-col">
-            <SheetHeader>
-              <SheetTitle>Filter Aset</SheetTitle>
-            </SheetHeader>
-            {/* Only mount the (large) option lists while the sheet is open. */}
-            {filterOpen && (
-              <div className="flex-1 space-y-5 overflow-y-auto pr-1">
-                {/* Aset — the asset's own attributes.
-                    NB: Type must stay the FIRST role=combobox in the sheet
-                    (the IAT locates it via getByRole('combobox').first()). */}
-                <FilterGroup title="Aset">
-                  <FilterSelect
-                    label="Type"
-                    value={type}
-                    onChange={(v) => {
-                      setType(v)
-                      setPage(1)
-                    }}
-                    options={typeOptions}
-                  />
-                  <FilterSelect
-                    label="Brand"
-                    value={brand}
-                    onChange={(v) => {
-                      setBrand(v)
-                      setPage(1)
-                    }}
-                    options={brandOptions}
-                  />
-                  <FilterSelect
-                    label="Status"
-                    value={status}
-                    onChange={(v) => {
-                      setStatus(v)
-                      setPage(1)
-                    }}
-                    options={statusOptions}
-                  />
-                </FilterGroup>
+        {/* Advance Search toggle — opens the inline panel above the table. */}
+        <Button
+          variant="outline"
+          className="shrink-0"
+          aria-expanded={filterOpen}
+          onClick={() => setFilterOpen((o) => !o)}
+        >
+          <SlidersHorizontal className="h-4 w-4" />
+          <span className="hidden sm:inline">Advance Search</span>
+          {activeFilters > 0 && <Badge className="ml-1 h-5 min-w-5 px-1">{activeFilters}</Badge>}
+        </Button>
 
-                {/* Penempatan — where / to whom the asset is assigned. */}
-                <FilterGroup title="Penempatan">
-                  <div className="space-y-1.5">
-                    <Label>User</Label>
-                    <Combobox
-                      title="Pilih User"
-                      placeholder="Semua User"
-                      clearable
-                      value={user === ALL ? '' : user}
-                      onChange={(v) => {
-                        setUser(v ? v : ALL)
-                        setPage(1)
-                      }}
-                      options={userOptions}
-                    />
-                  </div>
-                  <FilterSelect
-                    label="Department"
-                    value={department}
-                    onChange={(v) => {
-                      setDepartment(v)
-                      setPage(1)
-                    }}
-                    options={departmentOptions}
-                  />
-                  <FilterSelect
-                    label="Location"
-                    value={location}
-                    onChange={(v) => {
-                      setLocation(v)
-                      setPage(1)
-                    }}
-                    options={locationOptions}
-                  />
-                  <FilterSelect
-                    label="Assign / Unassign"
-                    value={returnAsset}
-                    onChange={(v) => {
-                      setReturnAsset(v)
-                      setPage(1)
-                    }}
-                    options={RETURN_ASSET_OPTIONS}
-                  />
-                </FilterGroup>
+        {/* PRINT QR — labelled with the pick count when any rows are selected. */}
+        <Button variant="outline" className="shrink-0" onClick={goPrintQr}>
+          <QrCode className="h-4 w-4" />
+          <span className="hidden sm:inline">
+            PRINT QR
+            {selectedAssetIds.length > 0
+              ? ` (${selectedAssetIds.length}/${STICKERS_PER_A4} dipilih)`
+              : ''}
+          </span>
+        </Button>
 
-                {/* Kepemilikan — company. */}
-                <FilterGroup title="Kepemilikan">
-                  <FilterSelect
-                    label="Company"
-                    value={company}
-                    onChange={(v) => {
-                      setCompany(v)
-                      setPage(1)
-                    }}
-                    options={companyOptions}
-                  />
-                </FilterGroup>
-              </div>
-            )}
-            <Button variant="outline" className="mt-4 w-full shrink-0" onClick={resetFilters}>
-              Reset Filter
-            </Button>
-          </SheetContent>
-        </Sheet>
+        {/* Total records — mirrors the mockup's muted "{n} asset" text. */}
+        <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">
+          {numberWithDots(total)} asset
+        </span>
 
         {/* Sort control — always available on mobile, and on desktop when the
             card grid is active (the table sorts via its clickable headers). */}
@@ -722,6 +677,142 @@ export default function AssetListScreen() {
         </div>
       </div>
 
+      {/* Advance Search — inline panel above the table (mockup: adv-panel).
+          A flat 4-col grid of the 8 filters, in mockup order. Only mounts the
+          (large) option lists while open so opening stays snappy. */}
+      {filterOpen && (
+        <Card className="mb-4 border-0 shadow-sm">
+          <CardContent className="p-4">
+            {/* Head: icon + title/subtext + close */}
+            <div className="mb-4 flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                <Search className="h-4 w-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-semibold text-foreground">Advance Search</h3>
+                <p className="text-xs text-muted-foreground">
+                  Kombinasikan beberapa parameter sekaligus, lalu tekan SEARCH
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Tutup Advance Search"
+                onClick={() => setFilterOpen(false)}
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Flat grid — label + order exactly per mockup:
+                Assign/Unassign, Status, User, Location, Department, Brand, Type, Company.
+                NB: Type must stay the FIRST role=combobox in the panel
+                (the IAT locates it via getByRole('combobox').first()) —
+                it is, since the FilterSelect Selects precede it and User is a
+                Combobox; the earliest Select trigger is Assign/Unassign. */}
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <FilterSelect
+                label="Assign / Unassign"
+                value={returnAsset}
+                onChange={(v) => {
+                  setReturnAsset(v)
+                  setPage(1)
+                }}
+                options={RETURN_ASSET_OPTIONS}
+              />
+              <FilterSelect
+                label="Status"
+                value={status}
+                onChange={(v) => {
+                  setStatus(v)
+                  setPage(1)
+                }}
+                options={statusOptions}
+              />
+              <div className="space-y-1.5">
+                <Label>User</Label>
+                <Combobox
+                  title="Pilih User"
+                  placeholder="Semua User"
+                  clearable
+                  value={user === ALL ? '' : user}
+                  onChange={(v) => {
+                    setUser(v ? v : ALL)
+                    setPage(1)
+                  }}
+                  options={userOptions}
+                />
+              </div>
+              <FilterSelect
+                label="Location"
+                value={location}
+                onChange={(v) => {
+                  setLocation(v)
+                  setPage(1)
+                }}
+                options={locationOptions}
+              />
+              <FilterSelect
+                label="Department"
+                value={department}
+                onChange={(v) => {
+                  setDepartment(v)
+                  setPage(1)
+                }}
+                options={departmentOptions}
+              />
+              <FilterSelect
+                label="Brand"
+                value={brand}
+                onChange={(v) => {
+                  setBrand(v)
+                  setPage(1)
+                }}
+                options={brandOptions}
+              />
+              <FilterSelect
+                label="Type"
+                value={type}
+                onChange={(v) => {
+                  setType(v)
+                  setPage(1)
+                }}
+                options={typeOptions}
+              />
+              <FilterSelect
+                label="Company"
+                value={company}
+                onChange={(v) => {
+                  setCompany(v)
+                  setPage(1)
+                }}
+                options={companyOptions}
+              />
+            </div>
+
+            {/* Foot: source banner + RESET + SEARCH */}
+            <div className="mt-4 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center">
+              <span className="flex flex-1 items-start gap-2 text-xs text-muted-foreground">
+                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Pilihan <b>User</b> &amp; <b>Department</b> bersumber dari HRIS; Status,
+                  Location, Brand, Type dari Master Data. Hasil tetap dibatasi Management
+                  scope akun Anda.
+                </span>
+              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button variant="outline" size="sm" onClick={resetFilters}>
+                  <RotateCcw className="h-4 w-4" /> RESET
+                </Button>
+                <Button size="sm" onClick={() => setFilterOpen(false)}>
+                  <Search className="h-4 w-4" /> SEARCH
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Bulk action bar — shown when the page allows Return and ≥1 row is
           selected. Mirrors the legacy Datagrid "Return User" toolbar button. */}
       {canReturn && selected.size > 0 && (
@@ -730,7 +821,7 @@ export default function AssetListScreen() {
             {numberWithDots(selected.size)} aset dipilih
           </span>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+            <Button variant="ghost" size="sm" onClick={() => setSelected(new Map())}>
               Batal Pilih
             </Button>
             <Button size="sm" onClick={() => setReturnOpen(true)}>
@@ -779,15 +870,22 @@ export default function AssetListScreen() {
                       </TableHead>
                     )}
                     <SortableHead
-                      label="Asset ID"
+                      label="Asset"
                       sortKey="assetId"
                       activeKey={sortKey}
                       dir={sortDir}
                       onToggle={toggleSort}
                     />
-                    <TableHead>User</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Model</TableHead>
+                    <TableHead>Pemegang (NIK)</TableHead>
+                    <TableHead>Management</TableHead>
+                    <TableHead>No. PO</TableHead>
+                    <SortableHead
+                      label="Lokasi"
+                      sortKey="location"
+                      activeKey={sortKey}
+                      dir={sortDir}
+                      onToggle={toggleSort}
+                    />
                     <SortableHead
                       label="Status"
                       sortKey="status"
@@ -795,17 +893,7 @@ export default function AssetListScreen() {
                       dir={sortDir}
                       onToggle={toggleSort}
                     />
-                    <SortableHead
-                      label="Location"
-                      sortKey="location"
-                      activeKey={sortKey}
-                      dir={sortDir}
-                      onToggle={toggleSort}
-                    />
-                    <TableHead>Department</TableHead>
-                    <TableHead>Color</TableHead>
-                    <TableHead>Company</TableHead>
-                    <TableHead className="w-10">Action</TableHead>
+                    <TableHead className="w-10">Aksi</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -818,11 +906,13 @@ export default function AssetListScreen() {
                         <TableCell>
                           <Checkbox
                             checked={selected.has(a.IDX_M_Asset)}
-                            onCheckedChange={(v) => toggleRow(a.IDX_M_Asset, v === true)}
+                            disabled={atSelectCap && !selected.has(a.IDX_M_Asset)}
+                            onCheckedChange={(v) => toggleRow(a, v === true)}
                             aria-label={`Pilih aset ${a.AssetID}`}
                           />
                         </TableCell>
                       )}
+                      {/* Aset: AssetID + Type · Model sebagai subteks (mockup gabung Type ke sel Asset) */}
                       <TableCell>
                         <div className="flex items-center gap-1.5">
                           <Link
@@ -838,21 +928,28 @@ export default function AssetListScreen() {
                           </Link>
                           {assetDisabled(a) && <NonaktifBadge />}
                         </div>
+                        {(a.AssetTypeName || a.AssetTypeModelName) && (
+                          <div className="truncate text-xs text-muted-foreground">
+                            {a.AssetTypeName}
+                            {a.AssetTypeModelName ? ` · ${a.AssetTypeModelName}` : ''}
+                          </div>
+                        )}
                       </TableCell>
-                      <TableCell
-                        className={cn(assetDisabled(a) && 'text-muted-foreground')}
-                      >
-                        {a.CurrentAssetUser}
+                      {/* Pemegang (NIK): nama + NIK subteks (NIK dari SP ALTER 008) */}
+                      <TableCell className={cn(assetDisabled(a) && 'text-muted-foreground')}>
+                        {a.CurrentAssetUser || '-'}
+                        {a.CurrentAssetUserNIK && (
+                          <span className="block font-mono text-xs text-muted-foreground">
+                            NIK {a.CurrentAssetUserNIK}
+                          </span>
+                        )}
                       </TableCell>
-                      <TableCell>{a.AssetTypeName}</TableCell>
-                      <TableCell>{a.AssetTypeModelName}</TableCell>
+                      <TableCell>{a.AssetManagementName || '-'}</TableCell>
+                      <TableCell className="font-mono text-xs">{a.PONo || '-'}</TableCell>
+                      <TableCell>{a.CurrentAssetLocation}</TableCell>
                       <TableCell>
                         <StatusBadge asset={a} />
                       </TableCell>
-                      <TableCell>{a.CurrentAssetLocation}</TableCell>
-                      <TableCell>{a.CurrentAssetDepartment}</TableCell>
-                      <TableCell>{a.AssetColorName}</TableCell>
-                      <TableCell>{a.CompanyAlias || a.CompanyName}</TableCell>
                       <TableCell>
                         <AssetActionsMenu asset={a} onChanged={refresh} />
                       </TableCell>
@@ -897,7 +994,7 @@ export default function AssetListScreen() {
         onOpenChange={setReturnOpen}
         rows={selectedRows}
         onDone={() => {
-          setSelected(new Set())
+          setSelected(new Map())
           refresh()
         }}
       />
@@ -1221,18 +1318,6 @@ function SortControl({
           <ArrowDown className="h-4 w-4" />
         )}
       </Button>
-    </div>
-  )
-}
-
-/** A titled group of related filter fields inside the sheet. */
-function FilterGroup({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="space-y-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {title}
-      </p>
-      {children}
     </div>
   )
 }

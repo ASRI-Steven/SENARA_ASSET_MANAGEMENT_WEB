@@ -25,8 +25,19 @@ async function request<Row = Record<string, unknown>>(
     ...init,
   })
   if (res.status === 401) throw new UnauthorizedError()
-  const body = (await res.json()) as Envelope<Row>
-  return body
+  const raw = await res.text()
+  try {
+    return JSON.parse(raw) as Envelope<Row>
+  } catch {
+    // Respons bukan JSON — paling sering 404 "404 page not found" (BFF belum
+    // di-restart jadi route baru belum ada) atau proxy salah target. Kasih pesan
+    // yang jelas, bukan native "Unexpected non-whitespace character after JSON".
+    const snippet = raw.trim().slice(0, 120)
+    throw new Error(
+      `Respons server bukan JSON (HTTP ${res.status}) untuk ${path}` +
+        (snippet ? ` — "${snippet}". Sudah restart BFF?` : ''),
+    )
+  }
 }
 
 export const api = {

@@ -42,6 +42,12 @@ export interface MasterRow {
 export interface MasterEntityMeta {
   key: MasterEntityKey
   label: string
+  /**
+   * IDX_M_Forms (app 78) this master maps to — gates the Tambah/Ubah/Hapus
+   * buttons against the role's R/I/U/D permission (usePermsStore). Omit (e.g.
+   * Group has no app-78 form) → buttons ungated by permission.
+   */
+  formIdx?: number
   /** Column holding the human-readable name (e.g. "AssetBrandName", "Name"). */
   nameKey: string
   /** Column holding the asset count (varies: AssetCount / AssetStatusCount…). */
@@ -92,6 +98,7 @@ export const MASTER_ENTITIES: MasterEntityMeta[] = [
   {
     key: 'brand',
     label: 'Asset Brand',
+    formIdx: 31078,
     nameKey: 'AssetBrandName',
     countKey: 'AssetCount',
     idxKey: 'IDX_M_AssetBrand',
@@ -100,6 +107,7 @@ export const MASTER_ENTITIES: MasterEntityMeta[] = [
   {
     key: 'color',
     label: 'Asset Color',
+    formIdx: 31083,
     nameKey: 'AssetColorName',
     countKey: 'AssetCount',
     idxKey: 'IDX_M_AssetColor',
@@ -108,6 +116,7 @@ export const MASTER_ENTITIES: MasterEntityMeta[] = [
   {
     key: 'size',
     label: 'Asset Size',
+    formIdx: 31082,
     nameKey: 'AssetSizeName',
     countKey: 'AssetCount',
     idxKey: 'IDX_M_AssetSize',
@@ -116,6 +125,7 @@ export const MASTER_ENTITIES: MasterEntityMeta[] = [
   {
     key: 'status',
     label: 'Asset Status',
+    formIdx: 31084,
     nameKey: 'AssetStatusName',
     countKey: 'AssetStatusCount',
     idxKey: 'IDX_M_AssetStatus',
@@ -124,6 +134,7 @@ export const MASTER_ENTITIES: MasterEntityMeta[] = [
   {
     key: 'management',
     label: 'Asset Management',
+    formIdx: 31077,
     nameKey: 'AssetManagementName',
     countKey: 'AssetManagementCount',
     idxKey: 'IDX_M_AssetManagement',
@@ -144,6 +155,7 @@ export const MASTER_ENTITIES: MasterEntityMeta[] = [
   {
     key: 'location',
     label: 'Asset Location',
+    formIdx: 31076,
     nameKey: 'AssetLocationName',
     countKey: 'AssetLocationCount',
     idxKey: 'IDX_M_AssetLocation',
@@ -155,6 +167,7 @@ export const MASTER_ENTITIES: MasterEntityMeta[] = [
   {
     key: 'type',
     label: 'Asset Type',
+    formIdx: 31079,
     nameKey: 'AssetTypeName',
     countKey: 'AssetCount',
     idxKey: 'IDX_M_AssetType',
@@ -168,6 +181,7 @@ export const MASTER_ENTITIES: MasterEntityMeta[] = [
     // parent-Type dropdown ("Choose Type") + a "Type Model Name" text field.
     key: 'model',
     label: 'Master Type Model',
+    formIdx: 31080,
     nameKey: 'AssetTypeModelName',
     countKey: 'AssetCount',
     idxKey: 'IDX_M_AssetTypeModel',
@@ -190,6 +204,7 @@ export const MASTER_ENTITIES: MasterEntityMeta[] = [
     // NIK + Name are required; the HRIS org fields may be blank for some users.
     key: 'user',
     label: 'Asset User',
+    formIdx: 31081,
     nameKey: 'Name',
     countKey: 'AssetUserCount',
     idxKey: 'IDX_M_AssetUser',

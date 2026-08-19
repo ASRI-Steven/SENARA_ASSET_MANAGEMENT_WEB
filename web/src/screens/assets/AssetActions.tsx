@@ -10,13 +10,16 @@ import {
   Pencil,
   UserCheck,
   MapPin,
-  Activity,
+  Tag,
   Building2,
-  Briefcase,
+  Layers,
   RotateCcw,
   Power,
   PowerOff,
   Loader2,
+  Ban,
+  Check,
+  AlertTriangle,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -35,7 +38,6 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -123,6 +125,7 @@ function ActionDialog({
   canSubmit,
   onSubmit,
   destructive,
+  icon,
   children,
 }: {
   open: boolean
@@ -134,14 +137,29 @@ function ActionDialog({
   canSubmit: boolean
   onSubmit: () => void
   destructive?: boolean
+  icon?: ReactNode
   children?: ReactNode
 }) {
   return (
     <Dialog open={open} onOpenChange={(o) => !submitting && onOpenChange(o)}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          {description && <DialogDescription>{description}</DialogDescription>}
+          <div className="flex items-start gap-3">
+            {icon ? (
+              <span
+                className={cn(
+                  'grid h-9 w-9 shrink-0 place-items-center rounded-lg',
+                  destructive ? 'bg-destructive/10 text-destructive' : 'bg-primary/10 text-primary',
+                )}
+              >
+                {icon}
+              </span>
+            ) : null}
+            <div className="min-w-0 space-y-1">
+              <DialogTitle>{title}</DialogTitle>
+              {description && <DialogDescription>{description}</DialogDescription>}
+            </div>
+          </div>
         </DialogHeader>
         {children}
         <DialogFooter>
@@ -154,7 +172,13 @@ function ActionDialog({
             onClick={onSubmit}
             disabled={submitting || !canSubmit}
           >
-            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {submitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : destructive ? (
+              <Ban className="h-4 w-4" />
+            ) : (
+              <Check className="h-4 w-4" />
+            )}
             {submitLabel}
           </Button>
         </DialogFooter>
@@ -225,7 +249,7 @@ function AssignUserDialog({
         Date: date,
         Remarks: remarks,
       })
-      toast.success(msg || 'User berhasil ditetapkan')
+      toast.success(msg || 'Pemegang asset diperbarui')
       onOpenChange(false)
       onDone()
     } catch (e) {
@@ -239,16 +263,17 @@ function AssignUserDialog({
     <ActionDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Assign User"
+      title="Assign User Pemegang"
       description={`Tetapkan user untuk aset ${asset.AssetID}.`}
-      submitLabel="Simpan"
+      icon={<UserCheck className="h-[18px] w-[18px]" />}
+      submitLabel="Assign"
       submitting={submitting}
       canSubmit={!!user}
       onSubmit={submit}
     >
       <div className="space-y-4">
         <div className="space-y-1.5">
-          <Label>User</Label>
+          <Label>Cari Karyawan *</Label>
           <Combobox
             id="assign-user-picker"
             title="Pilih User"
@@ -256,14 +281,11 @@ function AssignUserDialog({
             onChange={setUser}
             options={userOptions}
             disabled={lookupsLoading || !!lookupsError}
-            placeholder={lookupsLoading ? 'Memuat…' : 'Pilih user'}
+            placeholder={lookupsLoading ? 'Memuat…' : 'Ketik nama atau NIK…'}
           />
           {lookupsError && <p className="text-xs text-destructive">{lookupsError}</p>}
         </div>
-        <div className="space-y-1.5">
-          <Label>Tanggal</Label>
-          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        </div>
+        {/* Field Tanggal disembunyikan (mockup cuma Remarks) — tetap kirim tanggal hari ini ke BFF via `date`. */}
         <RemarksField value={remarks} onChange={setRemarks} disabled={submitting} />
       </div>
     </ActionDialog>
@@ -315,7 +337,7 @@ function AssignLocationDialog({
         Date: date,
         Remarks: remarks,
       })
-      toast.success(msg || 'Location berhasil ditetapkan')
+      toast.success(msg || 'Lokasi asset diperbarui')
       onOpenChange(false)
       onDone()
     } catch (e) {
@@ -331,6 +353,7 @@ function AssignLocationDialog({
       onOpenChange={onOpenChange}
       title="Assign Location"
       description={`Tetapkan location untuk aset ${asset.AssetID}.`}
+      icon={<MapPin className="h-[18px] w-[18px]" />}
       submitLabel="Simpan"
       submitting={submitting}
       canSubmit={!!location}
@@ -338,7 +361,13 @@ function AssignLocationDialog({
     >
       <div className="space-y-4">
         <div className="space-y-1.5">
-          <Label>Location</Label>
+          <Label>Lokasi saat ini</Label>
+          <div className="rounded border bg-muted/40 px-3 py-2 text-sm">
+            {asset.CurrentAssetLocation || '-'}
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label>Lokasi Baru *</Label>
           <Combobox
             id="assign-location-picker"
             title="Pilih Location"
@@ -348,12 +377,12 @@ function AssignLocationDialog({
             disabled={lookupsLoading || !!lookupsError}
             placeholder={lookupsLoading ? 'Memuat…' : 'Pilih location'}
           />
+          <p className="text-xs text-muted-foreground">
+            Daftar lokasi berasal dari Master Data — Location.
+          </p>
           {lookupsError && <p className="text-xs text-destructive">{lookupsError}</p>}
         </div>
-        <div className="space-y-1.5">
-          <Label>Tanggal</Label>
-          <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-        </div>
+        {/* Field Tanggal disembunyikan (mockup cuma Remarks) — tetap kirim tanggal hari ini ke BFF via `date`. */}
         <RemarksField value={remarks} onChange={setRemarks} disabled={submitting} />
       </div>
     </ActionDialog>
@@ -393,7 +422,7 @@ function AssignStatusDialog({
         IDX_M_AssetStatus: Number(status),
         Remarks: remarks,
       })
-      toast.success(msg || 'Status berhasil diperbarui')
+      toast.success(msg || 'Status asset diperbarui')
       onOpenChange(false)
       onDone()
     } catch (e) {
@@ -409,6 +438,7 @@ function AssignStatusDialog({
       onOpenChange={onOpenChange}
       title="Assign Status"
       description={`Ubah status aset ${asset.AssetID}.`}
+      icon={<Tag className="h-[18px] w-[18px]" />}
       submitLabel="Simpan"
       submitting={submitting}
       canSubmit={!!status}
@@ -416,7 +446,13 @@ function AssignStatusDialog({
     >
       <div className="space-y-4">
         <div className="space-y-1.5">
-          <Label>Status</Label>
+          <Label>Status saat ini</Label>
+          <div className="rounded border bg-muted/40 px-3 py-2 text-sm">
+            {asset.CurrentAssetStatus || '-'}
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label>Status Operasional Baru *</Label>
           <Select value={status} onValueChange={setStatus} disabled={lookupsLoading || !!lookupsError}>
             <SelectTrigger id="assign-status-picker">
               <SelectValue placeholder={lookupsLoading ? 'Memuat…' : 'Pilih status'} />
@@ -429,6 +465,10 @@ function AssignStatusDialog({
               ))}
             </SelectContent>
           </Select>
+          <p className="text-xs text-muted-foreground">
+            Status kritikal (Disposal / Inactive / Sold) tidak tersedia di sini — ajukan lewat modul
+            Batching Status Asset.
+          </p>
           {lookupsError && <p className="text-xs text-destructive">{lookupsError}</p>}
         </div>
         <RemarksField value={remarks} onChange={setRemarks} disabled={submitting} />
@@ -470,7 +510,7 @@ function ChangeManagementDialog({
         IDX_M_AssetManagement: Number(management),
         Remarks: remarks,
       })
-      toast.success(msg || 'Management berhasil diubah')
+      toast.success(msg || 'Management asset diperbarui')
       onOpenChange(false)
       onDone()
     } catch (e) {
@@ -485,7 +525,8 @@ function ChangeManagementDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="Change Management"
-      description={`Ubah management aset ${asset.AssetID} (saat ini: ${asset.AssetManagementName || '-'}).`}
+      description="Pindah pengelola (Managed By)"
+      icon={<Layers className="h-[18px] w-[18px]" />}
       submitLabel="Simpan"
       submitting={submitting}
       canSubmit={!!management}
@@ -493,7 +534,13 @@ function ChangeManagementDialog({
     >
       <div className="space-y-4">
         <div className="space-y-1.5">
-          <Label>Management</Label>
+          <Label>Management saat ini</Label>
+          <div className="rounded border bg-muted/40 px-3 py-2 text-sm">
+            {asset.AssetManagementName || '-'}
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label>Management Baru *</Label>
           <Select
             value={management}
             onValueChange={setManagement}
@@ -511,6 +558,12 @@ function ChangeManagementDialog({
             </SelectContent>
           </Select>
           {lookupsError && <p className="text-xs text-destructive">{lookupsError}</p>}
+        </div>
+        <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Asset akan hilang dari daftar Anda bila Management tujuan berada di luar scope akun Anda.
+          </span>
         </div>
         <RemarksField value={remarks} onChange={setRemarks} disabled={submitting} />
       </div>
@@ -598,7 +651,7 @@ function ChangeCompanyDialog({
         IDX_M_Company: Number(company),
         Remarks: remarks,
       })
-      toast.success(msg || 'Company berhasil diubah')
+      toast.success(msg || 'Company asset diperbarui')
       onOpenChange(false)
       onDone()
     } catch (e) {
@@ -616,7 +669,8 @@ function ChangeCompanyDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="Change Company"
-      description={`Ubah company aset ${asset.AssetID} (saat ini: ${asset.CompanyName || '-'}).`}
+      description="Pindah badan usaha pemilik asset"
+      icon={<Building2 className="h-[18px] w-[18px]" />}
       submitLabel="Simpan"
       submitting={submitting}
       canSubmit={!!company}
@@ -624,7 +678,13 @@ function ChangeCompanyDialog({
     >
       <div className="space-y-4">
         <div className="space-y-1.5">
-          <Label>Company</Label>
+          <Label>Company saat ini</Label>
+          <div className="rounded border bg-muted/40 px-3 py-2 text-sm">
+            {asset.CompanyName || '-'}
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label>Company Baru *</Label>
           <Combobox
             id="change-company-picker"
             title="Pilih Company"
@@ -635,6 +695,12 @@ function ChangeCompanyDialog({
             placeholder={loading ? 'Memuat…' : 'Pilih company'}
           />
           {err && <p className="text-xs text-destructive">{err}</p>}
+        </div>
+        <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Label Company pada sticker QR ikut berubah — sticker fisik perlu dicetak ulang.
+          </span>
         </div>
         <RemarksField value={remarks} onChange={setRemarks} disabled={submitting} />
       </div>
@@ -706,15 +772,24 @@ function ToggleDialog({
   onDone: () => void
 }) {
   const [submitting, setSubmitting] = useState(false)
+  const [remarks, setRemarks] = useState('')
   const isDisable = mode === 'disable'
 
+  useEffect(() => {
+    if (open) setRemarks('')
+  }, [open])
+
   async function submit() {
+    // Disable wajib disertai alasan (tercatat di History Asset).
+    if (isDisable && !remarks.trim()) return
     setSubmitting(true)
     try {
+      // TODO: disableAsset() belum menerima Remarks (lihat api/assets.ts). Alasan
+      // tetap diwajibkan di UI; teruskan ke API begitu signature mendukung Remarks.
       const msg = isDisable
         ? await disableAsset(asset.IDX_M_Asset)
         : await enableAsset(asset.IDX_M_Asset)
-      toast.success(msg || (isDisable ? 'Aset dinonaktifkan' : 'Aset diaktifkan'))
+      toast.success(msg || (isDisable ? 'Asset dinonaktifkan' : 'Aset diaktifkan'))
       onOpenChange(false)
       onDone()
     } catch (e) {
@@ -728,18 +803,44 @@ function ToggleDialog({
     <ActionDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={isDisable ? 'Nonaktifkan Aset' : 'Aktifkan Aset'}
+      title={isDisable ? 'Disable Asset' : 'Enable Asset'}
       description={
         isDisable
-          ? `Yakin ingin menonaktifkan aset ${asset.AssetID}? Aset tidak akan tampil di daftar aktif.`
+          ? `Nonaktifkan aset ${asset.AssetID}.`
           : `Aktifkan kembali aset ${asset.AssetID}?`
       }
-      submitLabel={isDisable ? 'Nonaktifkan' : 'Aktifkan'}
+      icon={isDisable ? <Ban className="h-[18px] w-[18px]" /> : <Power className="h-[18px] w-[18px]" />}
+      submitLabel={isDisable ? 'Disable' : 'Enable'}
       submitting={submitting}
-      canSubmit
+      canSubmit={!isDisable || !!remarks.trim()}
       destructive={isDisable}
       onSubmit={submit}
-    />
+    >
+      {isDisable ? (
+        <div className="space-y-4">
+          <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-800">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="space-y-1">
+              <p className="text-sm font-semibold">Asset disembunyikan dari daftar aktif</p>
+              <p className="text-xs">
+                Data &amp; History tetap tersimpan. Asset yang di-disable tidak muncul di Manage Asset
+                dan tidak ikut dihitung pada Cakupan Opname.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Alasan *</Label>
+            <Textarea
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              rows={2}
+              disabled={submitting}
+              placeholder="Alasan asset dinonaktifkan — wajib, tercatat di History Asset…"
+            />
+          </div>
+        </div>
+      ) : null}
+    </ActionDialog>
   )
 }
 
@@ -807,7 +908,7 @@ export function AssetActionsMenu({
               <DropdownMenuItem
                 onClick={() => navigate(`/assets/${encodeURIComponent(asset.AssetID)}`)}
               >
-                <Eye className="h-4 w-4" /> Lihat Detail
+                <Eye className="h-4 w-4" /> Detail
               </DropdownMenuItem>
               {can(asset.isUpdate) ? (
                 <DropdownMenuItem
@@ -833,12 +934,12 @@ export function AssetActionsMenu({
           ) : null}
           {can(asset.isAssignStatus) ? (
             <DropdownMenuItem onClick={() => setAction('assign-status')}>
-              <Activity className="h-4 w-4" /> Assign Status
+              <Tag className="h-4 w-4" /> Assign Status
             </DropdownMenuItem>
           ) : null}
           {can(asset.isChangeManagement) ? (
             <DropdownMenuItem onClick={() => setAction('change-management')}>
-              <Briefcase className="h-4 w-4" /> Change Management
+              <Layers className="h-4 w-4" /> Change Management
             </DropdownMenuItem>
           ) : null}
           {can(asset.isChangeCompany) ? (
@@ -846,7 +947,8 @@ export function AssetActionsMenu({
               <Building2 className="h-4 w-4" /> Change Company
             </DropdownMenuItem>
           ) : null}
-          {can(asset.isReturn) ? (
+          {/* Return disembunyikan (tidak ada di mockup) — ganti `false` -> `can(asset.isReturn)` untuk mengaktifkan lagi. */}
+          {false && can(asset.isReturn) ? (
             <DropdownMenuItem onClick={() => setAction('return')}>
               <RotateCcw className="h-4 w-4" /> Return
             </DropdownMenuItem>
@@ -858,12 +960,12 @@ export function AssetActionsMenu({
               className="text-destructive focus:text-destructive"
               onClick={() => setAction('disable')}
             >
-              <PowerOff className="h-4 w-4" /> Nonaktifkan
+              <PowerOff className="h-4 w-4" /> Disable
             </DropdownMenuItem>
           ) : null}
           {canEnable ? (
             <DropdownMenuItem onClick={() => setAction('enable')}>
-              <Power className="h-4 w-4" /> Aktifkan
+              <Power className="h-4 w-4" /> Enable
             </DropdownMenuItem>
           ) : null}
         </DropdownMenuContent>

@@ -8,6 +8,9 @@ import {
   Search,
   AlertCircle,
   Loader2,
+  UserCog,
+  Info,
+  Save,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -59,6 +62,10 @@ interface FormState {
 }
 
 const EMPTY: FormState = { nik: '', security: '', management: '', company: '' }
+
+// Sentinel value for cross-management access. TODO: wire this to the backend
+// (currently the submit handler still sends Number(form.management)).
+const MANAGEMENT_ALL = 'ALL'
 
 export default function AdminAccessScreen() {
   const [searchInput, setSearchInput] = useState('')
@@ -360,24 +367,34 @@ export default function AdminAccessScreen() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editing ? 'Ubah Akses Admin' : 'Tambah Akses Admin'}</DialogTitle>
-            {editing && (
-              <DialogDescription>
-                {editing.NIK} / {editing.Name}
-              </DialogDescription>
-            )}
+            <div className="flex items-start gap-3">
+              <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary/10 text-primary">
+                <UserCog className="h-[18px] w-[18px]" />
+              </span>
+              <div className="space-y-1">
+                <DialogTitle>Assign User ke Role</DialogTitle>
+                <DialogDescription>NIK + Role + scope Management</DialogDescription>
+              </div>
+            </div>
           </DialogHeader>
           <form onSubmit={save} className="space-y-4">
             {!editing && (
               <div className="space-y-1.5">
-                <Label htmlFor="admin-nik">NIK</Label>
-                <Input
-                  id="admin-nik"
-                  value={form.nik}
-                  onChange={(e) => set('nik', e.target.value)}
-                  placeholder="Masukkan NIK"
-                  autoFocus
-                />
+                <Label htmlFor="admin-nik">NIK Karyawan *</Label>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="admin-nik"
+                    value={form.nik}
+                    onChange={(e) => set('nik', e.target.value)}
+                    placeholder="Cari NIK / nama (sumber HRIS)…"
+                    className="pl-9"
+                    autoFocus
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Nama, jabatan &amp; unit terisi otomatis dari HRIS.
+                </p>
               </div>
             )}
 
@@ -389,7 +406,7 @@ export default function AdminAccessScreen() {
             )}
 
             <div className="space-y-1.5">
-              <Label>Security</Label>
+              <Label>Role Name</Label>
               <Select
                 value={form.security}
                 onValueChange={(v) => set('security', v)}
@@ -411,7 +428,7 @@ export default function AdminAccessScreen() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Managed By</Label>
+              <Label>Management</Label>
               <Select
                 value={form.management}
                 onValueChange={(v) => set('management', v)}
@@ -421,6 +438,8 @@ export default function AdminAccessScreen() {
                   <SelectValue placeholder="Pilih management" />
                 </SelectTrigger>
                 <SelectContent>
+                  {/* TODO: wire MANAGEMENT_ALL sentinel to the submit handler / endpoint. */}
+                  <SelectItem value={MANAGEMENT_ALL}>[ALL] — semua management</SelectItem>
                   {lookups?.managements.map((m) => (
                     <SelectItem key={m.IDX_M_AssetManagement} value={String(m.IDX_M_AssetManagement)}>
                       {m.AssetManagementName}
@@ -428,6 +447,13 @@ export default function AdminAccessScreen() {
                   ))}
                 </SelectContent>
               </Select>
+              <div className="flex items-start gap-2 rounded-lg bg-sky-50 p-3 text-xs text-muted-foreground">
+                <Info className="mt-0.5 h-4 w-4 shrink-0 text-sky-500" />
+                <span>
+                  Data asset yang tampil untuk user ini akan difilter sesuai Management terpilih.
+                  Pilih [ALL] untuk akses lintas management.
+                </span>
+              </div>
             </div>
 
             <div className="space-y-1.5">
@@ -460,7 +486,11 @@ export default function AdminAccessScreen() {
                 Batal
               </Button>
               <Button type="submit" disabled={saving || detailLoading}>
-                {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
                 Simpan
               </Button>
             </DialogFooter>

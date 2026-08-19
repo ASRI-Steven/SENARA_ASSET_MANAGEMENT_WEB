@@ -231,6 +231,96 @@ export async function deleteGroupAccess(idx: number): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// Role list (GroupRole) — ditarik LIVE dari CORES, sumber dropdown "Role Name".
+// Bukan opsi hardcoded: app 78 = PIC Asset(175)/Tim Asset(176)/Supervisor(177)/
+// Manager GA(178).
+// ---------------------------------------------------------------------------
+
+export interface RoleOption {
+  IDX_M_GroupsRole: number
+  GroupRole_Name: string
+}
+
+/** Bentuk mentah dari usp_ASRI_AppsManagement_User_Access_Role_List (ValidValue/ValueName). */
+interface RoleListRaw {
+  ValidValue: number | string
+  ValueName: string
+}
+
+/**
+ * GET /api/settings/role-list → daftar Role app 78 dari CORES (SP existing
+ * usp_ASRI_AppsManagement_User_Access_Role_List). SP mengembalikan baris
+ * placeholder "0 / -- SELECT ROLE --" yang kita buang.
+ */
+export async function fetchRoleList(): Promise<RoleOption[]> {
+  const env = await api.get<RoleListRaw>('/api/settings/role-list')
+  if (env.status !== 'success') throw new Error(env.message || 'Gagal memuat daftar role')
+  return rows(env)
+    .map((r) => ({ IDX_M_GroupsRole: Number(r.ValidValue), GroupRole_Name: (r.ValueName || '').trim() }))
+    .filter((r) => Number.isFinite(r.IDX_M_GroupsRole) && r.IDX_M_GroupsRole > 0)
+}
+
+// ---------------------------------------------------------------------------
+// User Setting — map user → Role (CORES) + scope Management (lokal).
+// Menggantikan matrix akses-menu (form R/I/U/D) yang tak lagi dipakai.
+// ---------------------------------------------------------------------------
+
+export interface UserSettingRow {
+  NIK: string
+  Name: string | null
+  /** Jabatan (POS_NAME) dari HRIS — sub-line di bawah nama. */
+  Jabatan: string | null
+  Department: string | null
+  IDX_M_GroupsRole: number | null
+  RoleName: string | null
+  /** 'HO' = [ALL] management; '' = scope ke IDX_M_AssetManagement. */
+  SecurityLevel: string | null
+  IDX_M_AssetManagement: number | null
+  AssetManagementName: string | null
+}
+
+/** POST /api/settings/user-setting/search {Keyword} → daftar user + Role + Management. */
+export async function searchUserSetting(keyword = ''): Promise<UserSettingRow[]> {
+  const env = await api.post<UserSettingRow>('/api/settings/user-setting/search', { Keyword: keyword })
+  if (env.status !== 'success') throw new Error(env.message || 'Gagal memuat data user')
+  return rows(env)
+}
+
+/**
+ * POST /api/settings/user-setting — assign user ke Role + Management.
+ * IDX_M_AssetManagement = 0 → [ALL] (scope lintas-management).
+ */
+export async function saveUserSetting(fields: {
+  NIK: string
+  IDX_M_GroupsRole: number
+  IDX_M_AssetManagement: number // 0 = [ALL]
+}): Promise<string> {
+  const env = await api.post<StatusEnvelope>('/api/settings/user-setting', fields)
+  return assertStatus(env)
+}
+
+/** DELETE /api/settings/user-setting {NIK} — lepas Role + scope Management. */
+export async function deleteUserSetting(nik: string): Promise<string> {
+  const env = await api.del<StatusEnvelope>('/api/settings/user-setting', { NIK: nik })
+  return assertStatus(env)
+}
+
+/** Karyawan HRIS untuk picker (SEMUA aktif, termasuk yang sudah punya role). */
+export interface EmployeeOption {
+  NIK: string
+  Name: string
+  Jabatan: string | null
+  Department: string | null
+}
+
+/** GET /api/settings/employee-list → semua karyawan HRIS aktif (NIK + nama + jabatan). */
+export async function fetchEmployeeList(): Promise<EmployeeOption[]> {
+  const env = await api.get<EmployeeOption>('/api/settings/employee-list')
+  if (env.status !== 'success') throw new Error(env.message || 'Gagal memuat daftar karyawan')
+  return rows(env)
+}
+
+// ---------------------------------------------------------------------------
 // User Roles (UserASRILup) — per-form R/I/U/D matrix
 // ---------------------------------------------------------------------------
 

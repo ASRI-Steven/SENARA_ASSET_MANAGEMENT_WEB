@@ -7,9 +7,9 @@ export function BrandMark({ compact = false }: { compact?: boolean }) {
       </div>
       {!compact && (
         <div className="leading-tight">
-          <div className="text-sm font-semibold text-foreground">ASRILup</div>
+          <div className="text-sm font-semibold text-foreground">Senara</div>
           <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
-            Asset Management
+            Asset Management · Backend
           </div>
         </div>
       )}

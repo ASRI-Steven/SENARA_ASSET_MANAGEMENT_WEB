@@ -15,15 +15,22 @@ func readSession(r *http.Request) string {
 	return c.Value
 }
 
-func setSession(w http.ResponseWriter, value string, secure bool) {
-	http.SetCookie(w, &http.Cookie{
+func setSession(w http.ResponseWriter, value string, secure, persistent bool) {
+	c := &http.Cookie{
 		Name:     SessionCookieName,
 		Value:    value,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
-	})
+	}
+	// "Ingat saya" → cookie PERSISTEN (tahan tutup-buka browser). Tanpa ini cookie
+	// bersifat session (hilang saat browser ditutup). Tetap dibatasi Expires_Date
+	// sesi di T_Sessions (sisi server).
+	if persistent {
+		c.MaxAge = 60 * 60 * 24 * 30 // 30 hari
+	}
+	http.SetCookie(w, c)
 }
 
 func clearSession(w http.ResponseWriter, secure bool) {

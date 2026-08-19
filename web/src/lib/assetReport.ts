@@ -196,7 +196,7 @@ export async function buildAssetReport(
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(8)
       doc.setTextColor(120, 120, 120)
-      doc.text('ASRILup — Manage Asset', marginX, pageHeight - 8)
+      doc.text('Senara — Manage Asset', marginX, pageHeight - 8)
     },
   })
 

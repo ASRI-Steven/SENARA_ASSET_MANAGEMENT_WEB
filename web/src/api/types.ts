@@ -54,11 +54,20 @@ export interface DashboardByTypeModel {
   IDX_M_AssetTypeModel: number
 }
 
-/** Normalised dashboard payload (all 5 rowsets in one object). */
+/** POST /api/dashboard — data[5] (by management; rowset ditambah oleh ALTER SP 004). */
+export interface DashboardByManagement {
+  IDX_M_AssetManagement: number
+  AssetManagementName: string
+  AssetCount: number
+  TotalAssetValue: string // numeric string
+}
+
+/** Normalised dashboard payload (6 rowsets). */
 export interface DashboardData {
   summary: DashboardSummary | null
   byCompany: DashboardByCompany[]
   byLocation: DashboardByLocation[]
   byType: DashboardByType[]
   byTypeModel: DashboardByTypeModel[]
+  byManagement: DashboardByManagement[]
 }

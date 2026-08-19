@@ -1,8 +1,10 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -51,6 +53,18 @@ func (s *Service) makeHandler(ep endpoint) http.HandlerFunc {
 		if ep.requiresSession() && session == "" {
 			writeUnauthorized(w)
 			return
+		}
+
+		// Enforce izin aksi per-form (app 78) utk SP mutation. Sembunyikan tombol di
+		// FE saja tak cukup — mutation-nya benar-benar jalan tanpa cek ini. Sumber
+		// kebenaran: CORES T_TemplatesRole (yang dikelola di Senara). Lenient saat
+		// error (CORES hiccup) → hanya tolak bila cek SUKSES dan hasilnya jelas 0.
+		if g, ok := guardBySP[ep.sp]; ok {
+			allowed, gErr := s.hasFormAction(r.Context(), session, g.form, g.action)
+			if gErr == nil && !allowed {
+				writeError(w, "Anda tidak berwenang "+actionLabel(g.action)+" pada menu ini — role Anda tak memiliki akses.")
+				return
+			}
 		}
 
 		body := decodeBody(r)
@@ -112,7 +126,21 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "NIK atau password salah")
 		return
 	}
-	setSession(w, session, s.secure)
+	// Gate akses aplikasi: user WAJIB punya role ASRILup (app 78) aktif di CORES.
+	// Tanpa role → login ditolak + sesi yang baru dibuat dihancurkan (hapus role =
+	// cabut akses). Baca CORES (live) via usp_ASRI_HasAppAccess.
+	accRows, accErr := mssql.ExecSP(r.Context(), s.db, "usp_ASRI_HasAppAccess",
+		[]mssql.NamedArg{{Name: "Session_ID", Value: session}, {Name: "IDX_M_Apps", Value: "78"}})
+	// Lenient saat error (CORES hiccup) → tetap izinkan; hanya tolak bila cek SUKSES
+	// dan hasilnya jelas "tidak punya akses".
+	if accErr == nil && firstString(accRows, "HasAccess") != "1" {
+		_, _ = mssql.ExecSP(r.Context(), s.db, "usp_T_Sessions_Destroy",
+			[]mssql.NamedArg{{Name: "SessionID", Value: session}})
+		writeError(w, "Akun Anda belum di-assign role Senara. Hubungi Tim Asset.")
+		return
+	}
+	// "Ingat saya" (Remember): default persisten kecuali frontend kirim "0".
+	setSession(w, session, s.secure, toStr(body["Remember"]) != "0")
 	writeSuccess(w, rowsets)
 }
 
@@ -120,6 +148,16 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleCheck(w http.ResponseWriter, r *http.Request) {
 	session := readSession(r)
 	if session == "" {
+		writeUnauthorized(w)
+		return
+	}
+	// Re-gate tiap refresh: kalau role app-78 sudah dicabut (via User Setting / Senara),
+	// sesi langsung dianggap tak berwenang → user keluar saat refresh. Lenient saat
+	// error (CORES hiccup) supaya user aktif tak ter-logout gara-gara gangguan sesaat.
+	accRows, accErr := mssql.ExecSP(r.Context(), s.db, "usp_ASRI_HasAppAccess",
+		[]mssql.NamedArg{{Name: "Session_ID", Value: session}, {Name: "IDX_M_Apps", Value: "78"}})
+	if accErr == nil && firstString(accRows, "HasAccess") != "1" {
+		clearSession(w, s.secure)
 		writeUnauthorized(w)
 		return
 	}
@@ -205,6 +243,41 @@ func (s *Service) handleReturn(w http.ResponseWriter, r *http.Request) {
 	writeSuccess(w, last)
 }
 
+// hasFormAction asks CORES (via usp_ASRI_HasFormAction, app 78) whether the
+// session's role may perform @Action (I/U/D/A) on @form. Session resolved from
+// the LOCAL uvw_Session inside the SP.
+func (s *Service) hasFormAction(ctx context.Context, session string, form int, action string) (bool, error) {
+	rows, err := mssql.ExecSP(ctx, s.db, "usp_ASRI_HasFormAction", []mssql.NamedArg{
+		{Name: "Session_ID", Value: session},
+		{Name: "IDX_M_Forms", Value: strconv.Itoa(form)},
+		{Name: "Action", Value: action},
+		{Name: "IDX_M_Apps", Value: "78"},
+	})
+	if err != nil {
+		return false, err
+	}
+	// SP mengembalikan '1'/'0'; toleransi juga bool "true" bila kolom kebetulan BIT.
+	v := strings.TrimSpace(firstString(rows, "HasAccess"))
+	return v == "1" || strings.EqualFold(v, "true"), nil
+}
+
+// actionLabel renders a TemplateRole_Actions code as an Indonesian verb phrase
+// for the "not authorised" message.
+func actionLabel(a string) string {
+	switch a {
+	case "I":
+		return "menambah data"
+	case "U":
+		return "mengubah data"
+	case "D":
+		return "menghapus data"
+	case "A":
+		return "menyetujui"
+	default:
+		return "mengakses"
+	}
+}
+
 // statusIsError reports whether the SP's first-row StatusCode is "Error".
 func statusIsError(rowsets []mssql.Rowset) bool {
 	if len(rowsets) == 0 || len(rowsets[0]) == 0 {
@@ -260,10 +333,13 @@ func firstString(rowsets []mssql.Rowset, col string) string {
 	if len(rowsets) == 0 || len(rowsets[0]) == 0 {
 		return ""
 	}
-	if v, ok := rowsets[0][0][col]; ok {
+	if v, ok := rowsets[0][0][col]; ok && v != nil {
 		if s, ok := v.(string); ok {
 			return s
 		}
+		// Kolom non-string (INT/bit/dll) — mis. HasAccess. Stringify apa adanya
+		// supaya perbandingan (mis. == "1") tetap bekerja.
+		return fmt.Sprintf("%v", v)
 	}
 	return ""
 }

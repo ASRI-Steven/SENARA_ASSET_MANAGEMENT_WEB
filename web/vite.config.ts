@@ -41,11 +41,25 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': process.env.BFF_PROXY_TARGET ?? 'http://localhost:8090',
+      // Foto asset upload/preview microservice — di-proxy biar browser call
+      // same-origin + header `apiclient` di-inject server-side (nggak ke-bundle).
+      '/upload-svc': {
+        target: process.env.UPLOAD_TARGET ?? 'http://10.10.1.3:1323',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/upload-svc/, ''),
+        headers: { apiclient: process.env.UPLOAD_APICLIENT ?? 'RUrqnUUiRhReyqr1fJj795VAtIlDOEQH' },
+      },
     },
   },
   preview: {
     proxy: {
       '/api': process.env.BFF_PROXY_TARGET ?? 'http://localhost:8090',
+      '/upload-svc': {
+        target: process.env.UPLOAD_TARGET ?? 'http://10.10.1.3:1323',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/upload-svc/, ''),
+        headers: { apiclient: process.env.UPLOAD_APICLIENT ?? 'RUrqnUUiRhReyqr1fJj795VAtIlDOEQH' },
+      },
     },
   },
 })

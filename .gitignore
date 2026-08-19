@@ -15,9 +15,21 @@ web/dist/
 
 # === Go build artifacts ===
 *.exe
+*.exe~
 bff/bff
 bff/server
 /bff/bin/
+
+# === Air hot-reload temp ===
+bff/tmp/
+tmp/
+
+# === Local sample/data files (bukan bagian app) ===
+/contoh_batch_sold.xlsx
+*.xlsx~
+
+# === SQL SP/migration source (deploy ke DB terpisah, JANGAN masuk repo) ===
+sql/
 
 # === Test artifacts (Playwright) ===
 test-results/

@@ -15,6 +15,8 @@ export interface AssetRow {
   CompanyName: string
   CompanyAlias: string
   CurrentAssetUser: string
+  /** NIK pemegang saat ini — dari SP ALTER 008 (M_AssetUser.NIK); undefined bila SP belum di-apply. */
+  CurrentAssetUserNIK?: string
   /** Department of the current user — legacy grid "Department" column. */
   CurrentAssetDepartment: string
   CurrentAssetLocation: string
@@ -244,6 +246,9 @@ export interface HistoryEntry {
   startDate: string | null
   endDate: string | null
   remarks: string | null
+  changedBy: string | null // "Diubah oleh" — resolved name, else NIK (SP ALTER 005)
+  changedDate: string | null // DCreate (with time)
+  nik: string | null // NIK (khusus tab User; dari M_AssetUser.NIK)
 }
 
 export interface HistoryGroup {
@@ -263,6 +268,10 @@ interface RawHistoryRow {
   StartDate?: string
   EndDate?: string | null
   Remarks?: string | null
+  NIK?: string | null // user NIK (tab User; dari M_AssetUser.NIK)
+  ChangedByNIK?: string | null
+  ChangedByName?: string | null
+  ChangedDate?: string | null
 }
 
 async function fetchHistory(kind: string, idxAsset: number): Promise<RawHistoryRow[]> {
@@ -287,6 +296,13 @@ export async function fetchAssetHistory(idxAsset: number): Promise<HistoryGroup[
     fetchHistory('company', idxAsset).catch(() => [] as RawHistoryRow[]),
   ])
 
+  // "Diubah oleh" + waktu (dari SP ALTER 005; null untuk SP yg belum di-ALTER).
+  const chg = (r: RawHistoryRow) => ({
+    changedBy: r.ChangedByName ?? r.ChangedByNIK ?? null,
+    changedDate: r.ChangedDate ?? null,
+    nik: r.NIK ?? null, // hanya terisi utk tab User (SP-nya balikin S.NIK)
+  })
+
   return [
     {
       title: 'Status',
@@ -295,6 +311,7 @@ export async function fetchAssetHistory(idxAsset: number): Promise<HistoryGroup[
         startDate: r.AssetStatusDate ?? null,
         endDate: null,
         remarks: r.Remarks ?? null,
+        ...chg(r),
       })),
     },
     {
@@ -304,6 +321,7 @@ export async function fetchAssetHistory(idxAsset: number): Promise<HistoryGroup[
         startDate: r.StartDate ?? null,
         endDate: r.EndDate ?? null,
         remarks: r.Remarks ?? null,
+        ...chg(r),
       })),
     },
     {
@@ -313,6 +331,7 @@ export async function fetchAssetHistory(idxAsset: number): Promise<HistoryGroup[
         startDate: r.StartDate ?? null,
         endDate: r.EndDate ?? null,
         remarks: r.Remarks ?? null,
+        ...chg(r),
       })),
     },
     {
@@ -322,6 +341,7 @@ export async function fetchAssetHistory(idxAsset: number): Promise<HistoryGroup[
         startDate: r.AssetManagementDate ?? null,
         endDate: null,
         remarks: r.Remarks ?? null,
+        ...chg(r),
       })),
     },
     {
@@ -331,6 +351,7 @@ export async function fetchAssetHistory(idxAsset: number): Promise<HistoryGroup[
         startDate: r.AssetCompanyDate ?? null,
         endDate: null,
         remarks: r.Remarks ?? null,
+        ...chg(r),
       })),
     },
   ]
@@ -438,4 +459,47 @@ export async function enableAsset(idxAsset: number): Promise<string> {
 /** POST /api/assets/disable — disable (soft-delete) an asset. */
 export async function disableAsset(idxAsset: number): Promise<string> {
   return assertStatus(await api.post<StatusEnvelope>('/api/assets/disable', { IDX_M_Asset: idxAsset }))
+}
+
+// --- Foto asset (foto utama/registrasi) — T_AssetPhoto via SQL 007. ---
+
+export interface AssetPhoto {
+  IDX_T_AssetPhoto: number
+  IDX_M_Asset: number
+  PhotoPath: string
+  PhotoFileName: string | null
+  PhotoSize: number | null
+  PhotoWidth: number | null
+  PhotoHeight: number | null
+  UCreate: string | null
+  DCreate: string | null
+}
+
+/** POST /api/assets/photo → foto current sebuah aset (null kalau belum ada). */
+export async function fetchAssetPhoto(idxAsset: number): Promise<AssetPhoto | null> {
+  const env = await api.post<AssetPhoto>('/api/assets/photo', { IDX_M_Asset: idxAsset })
+  if (env.status !== 'success') return null
+  return (firstRow(env as never) as AssetPhoto | undefined) ?? null
+}
+
+/** POST /api/assets/photo/save → simpan/ganti foto current. Return StatusMessage. */
+export async function saveAssetPhoto(payload: {
+  IDX_M_Asset: number
+  PhotoPath: string
+  PhotoFileName: string
+  PhotoSize: number
+  PhotoWidth: number
+  PhotoHeight: number
+}): Promise<string> {
+  return assertStatus(
+    await api.post<StatusEnvelope>('/api/assets/photo/save', {
+      IDX_M_Asset: payload.IDX_M_Asset,
+      PhotoPath: payload.PhotoPath,
+      PhotoFileName: payload.PhotoFileName,
+      // BFF kirim body param sebagai string → kirim angka sbg string biar aman (bukan float).
+      PhotoSize: String(payload.PhotoSize),
+      PhotoWidth: String(payload.PhotoWidth),
+      PhotoHeight: String(payload.PhotoHeight),
+    }),
+  )
 }

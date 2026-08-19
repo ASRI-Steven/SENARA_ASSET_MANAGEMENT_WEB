@@ -1,38 +1,33 @@
-// Menu-access store: holds the set of legacy form URLs the current user may
-// access (from GET /api/menu). The nav components filter their items against it
-// so a user only sees the menus they have rights to (matches the legacy app,
-// which builds its drawer from the same access SP).
+// Menu-access store: holds the set of form IDs (IDX_M_Forms, app 78) the current
+// user may access (from GET /api/menu → usp_ASRI_GetMenu). The nav components
+// filter their items against it so a user only sees menus they have rights to.
 
 import { create } from 'zustand'
 import { fetchMenuAccess } from '@/api/menu'
 
-const norm = (u: string) => u.trim().toLowerCase()
-
 interface MenuState {
-  /** Accessible legacy form URLs (lowercased). null = not loaded yet. */
-  urls: Set<string> | null
+  /** Accessible IDX_M_Forms. null = not loaded / unknown → show optimistically. */
+  idxs: Set<number> | null
   loading: boolean
   load: () => Promise<void>
 }
 
 export const useMenuStore = create<MenuState>((set, get) => ({
-  urls: null,
+  idxs: null,
   loading: false,
   async load() {
     if (get().loading) return
     set({ loading: true })
     try {
       const forms = await fetchMenuAccess()
-      const urls = new Set(
-        forms
-          .map((f) => f.URL)
-          .filter((u): u is string => !!u)
-          .map(norm),
-      )
-      set({ urls, loading: false })
+      // Empty (invalid CORE session / not wired yet) → keep null = optimistic show-all
+      // so a transient/unauthorised menu response never blanks the whole nav.
+      if (forms.length > 0) {
+        set({ idxs: new Set(forms.map((f) => f.IDX_M_Forms)), loading: false })
+      } else {
+        set({ loading: false })
+      }
     } catch {
-      // Leave urls untouched (null → optimistic show) so a transient failure
-      // never blanks the whole nav.
       set({ loading: false })
     }
   },
@@ -40,13 +35,12 @@ export const useMenuStore = create<MenuState>((set, get) => ({
 
 /**
  * Whether a nav item should be visible given the loaded access set.
- * - no formUrl (PWA-only utility like Print QR, no legacy form) → always shown.
- * - not loaded yet (urls === null) → shown (optimistic; avoids a flash of empty
- *   nav while /api/menu is in flight).
- * - otherwise → only if the user has access to that form URL.
+ * - no formIdx (utility with no gating form) → always shown.
+ * - not loaded yet (idxs === null) → shown (optimistic; avoids a flash of empty nav).
+ * - otherwise → only if the user has access to that form.
  */
-export function canSeeMenu(urls: Set<string> | null, formUrl?: string): boolean {
-  if (!formUrl) return true
-  if (urls === null) return true
-  return urls.has(norm(formUrl))
+export function canSeeMenu(idxs: Set<number> | null, formIdx?: number): boolean {
+  if (formIdx == null) return true
+  if (idxs === null) return true
+  return idxs.has(formIdx)
 }

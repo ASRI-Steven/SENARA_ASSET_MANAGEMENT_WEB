@@ -4,14 +4,18 @@ import { Sidebar } from './Sidebar'
 import { BottomNav } from './BottomNav'
 import { TopBar } from './TopBar'
 import { useMenuStore } from '@/store/menu'
+import { usePermsStore } from '@/store/perms'
 
 // Responsive shell: fixed sidebar on desktop (lg+), bottom nav on mobile.
 export function AppShell() {
-  // Load the user's accessible menu once, so the nav can filter itself.
+  // Load the user's accessible menu (nav filter) + action permissions (button
+  // gating: Tambah/Ubah/Hapus/Approve) once on mount.
   const load = useMenuStore((s) => s.load)
+  const loadPerms = usePermsStore((s) => s.load)
   useEffect(() => {
     void load()
-  }, [load])
+    void loadPerms()
+  }, [load, loadPerms])
 
   return (
     <div className="min-h-[100dvh] bg-muted/30">

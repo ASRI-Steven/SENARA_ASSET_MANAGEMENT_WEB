@@ -1,0 +1,25 @@
+# air — live-reload BFF. Tiap file .go disave → auto rebuild + restart.
+# Jalankan lewat dev.bat (yang manggil air). Binari hasil build ada di ./tmp.
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  # Build ke ./tmp/bff.exe lalu jalankan dari sini (cwd = bff/, jadi .env kebaca).
+  cmd = "go build -o ./tmp/bff.exe ./cmd/server"
+  bin = "./tmp/bff.exe"
+  include_ext = ["go"]
+  exclude_dir = ["tmp", ".git"]
+  exclude_regex = ["_test\\.go"]
+  # Debounce biar nggak rebuild berkali-kali saat simpan beruntun.
+  delay = 600
+  # Kalau build error, jangan restart binari lama — tunggu diperbaiki.
+  stop_on_error = true
+  # Restart bersih: kirim interrupt dulu supaya port :8090 lepas sebelum start ulang.
+  send_interrupt = true
+  kill_delay = "800ms"
+
+[misc]
+  clean_on_exit = true
+
+[log]
+  time = false

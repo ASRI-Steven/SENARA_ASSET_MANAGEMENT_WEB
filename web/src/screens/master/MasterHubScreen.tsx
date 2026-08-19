@@ -6,27 +6,27 @@ import { MASTER_ENTITIES } from '@/api/master'
 import { NAV_SETTINGS } from '@/app/nav'
 import { useMenuStore, canSeeMenu } from '@/store/menu'
 
-// Legacy form URL per master entity — used to hide cards the user can't access.
-const MASTER_FORM_URL: Record<string, string> = {
-  brand: '/BrandAsset',
-  color: '/ColorAsset',
-  size: '/SizeAsset',
-  status: '/StatusAsset',
-  management: '/ManagementAsset',
-  group: '/GroupAsset',
-  location: '/LocationAsset',
-  type: '/TypeAsset',
-  model: '/ModelAsset',
-  user: '/UserAsset',
+// IDX_M_Forms (app 78) per master entity — hide cards the user can't access.
+// "group" tidak punya form di app 78 → undefined = selalu tampil.
+const MASTER_FORM_IDX: Record<string, number | undefined> = {
+  location: 31076,
+  management: 31077,
+  brand: 31078,
+  type: 31079,
+  model: 31080,
+  user: 31081,
+  size: 31082,
+  color: 31083,
+  status: 31084,
 }
 
 export default function MasterHubScreen() {
-  const urls = useMenuStore((s) => s.urls)
-  const entities = MASTER_ENTITIES.filter((m) => canSeeMenu(urls, MASTER_FORM_URL[m.key]))
-  const settings = NAV_SETTINGS.filter((s) => canSeeMenu(urls, s.formUrl))
+  const idxs = useMenuStore((s) => s.idxs)
+  const entities = MASTER_ENTITIES.filter((m) => canSeeMenu(idxs, MASTER_FORM_IDX[m.key]))
+  const settings = NAV_SETTINGS.filter((s) => canSeeMenu(idxs, s.formIdx))
   return (
     <>
-      <PageHeader title="Asset Master" description="Kelola data referensi aset" />
+      <PageHeader title="Master Data" description="Data referensi asset (9 sub-master)" />
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {entities.map((m) => (
           <Link key={m.key} to={`/master/${m.key}`}>

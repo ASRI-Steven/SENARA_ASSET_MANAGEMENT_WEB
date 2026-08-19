@@ -5,8 +5,8 @@ import { cn } from '@/lib/utils'
 
 // Mobile-only fixed bottom navigation.
 export function BottomNav() {
-  const urls = useMenuStore((s) => s.urls)
-  const items = BOTTOM_NAV.filter((item) => canSeeMenu(urls, item.formUrl))
+  const idxs = useMenuStore((s) => s.idxs)
+  const items = BOTTOM_NAV.filter((item) => canSeeMenu(idxs, item.formIdx))
   return (
     <nav className="fixed inset-x-0 bottom-0 z-30 border-t bg-white pb-[env(safe-area-inset-bottom)] lg:hidden">
       <div className="mx-auto flex max-w-md justify-around">

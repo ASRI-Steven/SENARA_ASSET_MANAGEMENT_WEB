@@ -41,10 +41,27 @@ export function initials(name?: string | null): string {
     .toUpperCase()
 }
 
-/** ISO date → "20 Jul 2026". */
+const ID_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
+
+/**
+ * ISO date → "20 Jul 2026". Baca komponen tanggal LANGSUNG dari string (tanpa
+ * new Date/toLocale) supaya wall-clock yang disimpan DB tampil apa adanya —
+ * driver mssql nge-tag DATETIME sebagai UTC, jadi konversi timezone browser
+ * malah menggeser jam (mis. 11:00 WIB jadi 18:00). Ini menghindarinya total.
+ */
 export function formatDate(iso?: string | null): string {
   if (!iso) return '-'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })
+  const m = String(iso).match(/(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return iso
+  const [, y, mo, d] = m
+  return `${d} ${ID_MONTHS[Number(mo) - 1] ?? mo} ${y}`
+}
+
+/** ISO datetime → "20 Jul 2026 · 09:05" (format mockup). Wall-clock apa adanya. */
+export function formatDateTime(iso?: string | null): string {
+  if (!iso) return '-'
+  const m = String(iso).match(/(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/)
+  if (!m) return formatDate(iso)
+  const [, y, mo, d, hh, mm] = m
+  return `${d} ${ID_MONTHS[Number(mo) - 1] ?? mo} ${y} · ${hh}:${mm}`
 }

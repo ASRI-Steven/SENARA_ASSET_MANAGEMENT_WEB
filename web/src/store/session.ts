@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { api, firstRow, UnauthorizedError } from '@/api/client'
+import { fetchUserRole } from '@/api/menu'
 
 export type SessionStatus = 'unknown' | 'authenticated' | 'unauthenticated'
 
@@ -12,10 +13,12 @@ export interface SessionUser {
 interface SessionState {
   status: SessionStatus
   user: SessionUser | null
+  /** GroupRole_Name (app 78) — "Lihat sebagai {role}" di topbar. null bila belum ada. */
+  role: string | null
   /** Resolve the current session from the httpOnly cookie (GET /api/auth/check). */
   check: () => Promise<void>
-  /** POST /api/auth/login; throws on invalid credentials. */
-  login: (nik: string, password: string) => Promise<void>
+  /** POST /api/auth/login; throws on invalid credentials. remember=false → cookie sesi (hilang saat browser ditutup). */
+  login: (nik: string, password: string, remember?: boolean) => Promise<void>
   /** POST /api/auth/logout; clears the cookie server-side. */
   logout: () => Promise<void>
 }
@@ -35,6 +38,7 @@ export const useSession = create<SessionState>()(
     (set) => ({
       status: 'unknown',
       user: null,
+      role: null,
 
       check: async () => {
         try {
@@ -42,9 +46,10 @@ export const useSession = create<SessionState>()(
           const row = firstRow(env)
           if (env.status === 'success' && row?.Name) {
             set({ status: 'authenticated', user: { nik: row.NIK ?? '', name: row.Name } })
+            void fetchUserRole().then((role) => set({ role }))
           } else {
             // Server answered but there's no valid session → definitely logged out.
-            set({ status: 'unauthenticated', user: null })
+            set({ status: 'unauthenticated', user: null, role: null })
           }
         } catch (e) {
           if (e instanceof UnauthorizedError) {
@@ -57,13 +62,18 @@ export const useSession = create<SessionState>()(
         }
       },
 
-      login: async (nik, password) => {
-        const env = await api.post<AuthRow>('/api/auth/login', { NIK: nik, Password: password })
+      login: async (nik, password, remember = true) => {
+        const env = await api.post<AuthRow>('/api/auth/login', {
+          NIK: nik,
+          Password: password,
+          Remember: remember ? '1' : '0',
+        })
         const row = firstRow(env)
         if (env.status !== 'success' || !row?.Session_ID) {
           throw new Error(env.message || 'NIK atau password salah')
         }
         set({ status: 'authenticated', user: { nik: row.NIK ?? nik, name: row.Name ?? nik } })
+        void fetchUserRole().then((role) => set({ role }))
       },
 
       logout: async () => {
@@ -72,7 +82,7 @@ export const useSession = create<SessionState>()(
         } catch {
           // ignore — clear the UI regardless
         }
-        set({ status: 'unauthenticated', user: null })
+        set({ status: 'unauthenticated', user: null, role: null })
       },
     }),
     {
@@ -80,7 +90,7 @@ export const useSession = create<SessionState>()(
       // Persist identity + status. A rehydrated 'authenticated' lets the app
       // render immediately on reload while check() re-validates in the
       // background (and only a definitive 401/no-session flips to logged-out).
-      partialize: (s) => ({ user: s.user, status: s.status }),
+      partialize: (s) => ({ user: s.user, status: s.status, role: s.role }),
     },
   ),
 )

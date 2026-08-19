@@ -175,7 +175,7 @@ export default function AssetEditScreen() {
         : prev,
     )
     setPoOpen(false)
-    toast.success('PO diterapkan')
+    toast.success(`No. PO ditautkan ulang: ${header.PONo}`)
   }
 
   async function submit(e: FormEvent) {
@@ -201,7 +201,7 @@ export default function AssetEditScreen() {
     setSubmitting(true)
     try {
       const msg = await updateAsset(payload)
-      toast.success(msg || 'Aset berhasil diperbarui')
+      toast.success(msg || `Perubahan asset ${asset.AssetID} tersimpan`)
       navigate(`/assets/${encodeURIComponent(assetId)}`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Gagal memperbarui aset')
@@ -263,7 +263,7 @@ export default function AssetEditScreen() {
             </Button>
             <Button type="submit" disabled={submitting}>
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Update
+              SAVE
             </Button>
           </div>
         }
@@ -275,7 +275,7 @@ export default function AssetEditScreen() {
           <CardContent className="grid gap-4 p-5 sm:grid-cols-2">
             <ReadOnlyField label="Managed By" value={asset.AssetManagementName} />
             <ReadOnlyField label="Company" value={asset.CompanyName} />
-            <ReadOnlyField label="User" value={asset.CurrentAssetUser} />
+            <ReadOnlyField label="User (Pemegang)" value={asset.CurrentAssetUser} />
             <ReadOnlyField label="Location" value={asset.CurrentAssetLocation} />
             <ReadOnlyField label="Status" value={asset.CurrentAssetStatus} />
             <ReadOnlyField label="Type" value={asset.AssetTypeName} />
@@ -340,15 +340,15 @@ export default function AssetEditScreen() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Purchase Order</Label>
+              <Label>No. PO</Label>
               <div className="flex gap-2">
                 <Input
                   value={form.poNo}
                   onChange={(e) => set('poNo', e.target.value)}
-                  placeholder="Purchase Order"
+                  placeholder="No. PO"
                 />
                 <Button type="button" variant="outline" onClick={() => setPoOpen(true)}>
-                  <Search className="h-4 w-4" /> Cari
+                  <Search className="h-4 w-4" /> Cari PO
                 </Button>
               </div>
             </div>
@@ -374,6 +374,7 @@ export default function AssetEditScreen() {
                 value={form.remarks}
                 onChange={(e) => set('remarks', e.target.value)}
                 rows={2}
+                placeholder="Catatan tambahan aset…"
               />
             </div>
           </CardContent>

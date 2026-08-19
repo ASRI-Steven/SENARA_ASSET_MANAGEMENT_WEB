@@ -82,6 +82,43 @@ var masterDefs = []masterDef{
 		[]string{"NIK", "Name", "PositionName", "DepartmentName", "DivisionName", "DirectorateName"}},
 }
 
+// formAction pairs an app-78 form with the required TemplateRole_Actions code.
+type formAction struct {
+	form   int
+	action string // R/I/U/D/A
+}
+
+// masterFormByRoute maps each Master CRUD route to its app-78 form IDX (nav.ts).
+// "group" has no app-78 form → left ungated.
+var masterFormByRoute = map[string]int{
+	"location": 31076, "management": 31077, "brand": 31078, "type": 31079,
+	"model": 31080, "user": 31081, "size": 31082, "color": 31083, "status": 31084,
+}
+
+// guardBySP maps a MUTATION SP name → the permission it requires. makeHandler
+// enforces it (via usp_ASRI_HasFormAction) before EXEC. Save=Insert, Update/
+// Enable/Disable=Update, Delete=Delete, Approve/Reject=Approve. All app 78.
+var guardBySP = buildGuards()
+
+func buildGuards() map[string]formAction {
+	g := map[string]formAction{
+		"usp_CMS_UploadAsset_Approve": {31085, "A"},
+		"usp_CMS_UploadAsset_Reject":  {31085, "A"},
+	}
+	for _, m := range masterDefs {
+		f, ok := masterFormByRoute[m.route]
+		if !ok {
+			continue // group (no app-78 form) stays ungated
+		}
+		g[m.sp+"_Save"] = formAction{f, "I"}
+		g[m.sp+"_Update"] = formAction{f, "U"}
+		g[m.sp+"_Enable"] = formAction{f, "U"}
+		g[m.sp+"_Disable"] = formAction{f, "U"}
+		g[m.sp+"_Delete"] = formAction{f, "D"}
+	}
+	return g
+}
+
 func bodyParams(sess bool, names ...string) []param {
 	out := make([]param, 0, len(names)+1)
 	if sess {
@@ -101,12 +138,25 @@ func endpoints() []endpoint {
 		// per-form R/I/U/D flags — used to filter the nav. usp_SM_PopulateMenuAccess
 		// lives only in SecurityManagementDB, so call it 3-part-qualified (the primary
 		// GeneralAffairDB connection reaches it cross-DB; sa has rights).
-		{"GET", "/api/menu", "SecurityManagementDB.dbo.usp_SM_PopulateMenuAccess",
-			[]param{sess(), c("IPAddress", ""), c("IDX_M_Apps", "32"), c("Status", ""), c("RecordStatus", "")}},
+		// Sidebar menu — role-filtered forms for ASRILup (IDX_M_Apps=78). Pakai
+		// BRIDGE LOKAL usp_ASRI_GetMenuLocal: session di-resolve dari uvw_Session
+		// (LOKAL — tempat login app ini nulis), form+role tetap dari CORES (live,
+		// filter Read). SP asli usp_ASRI_GetMenu jalan di CORE & validasi session
+		// CORE (kosong) → selalu "Invalid Session" → gating mati. Lihat sql/014.
+		{"GET", "/api/menu", "usp_ASRI_GetMenuLocal",
+			[]param{sess(), c("IDX_M_Apps", "78")}},
+		// Role user (GroupRole_Name app 78) untuk "Lihat sebagai {role}" di topbar.
+		{"GET", "/api/user/role", "usp_ASRI_GetUserRole", []param{sess(), c("IDX_M_Apps", "78")}},
+		// Aksi R/I/U/D/A per form (app 78) dari CORES T_TemplatesRole — FE pakai buat
+		// sembunyikan tombol Tambah/Ubah/Hapus/Approve. Enforcement ada di makeHandler
+		// (guardBySP) via usp_ASRI_HasFormAction. Lihat sql/015.
+		{"GET", "/api/permissions", "usp_ASRI_GetPermissions", []param{sess(), c("IDX_M_Apps", "78")}},
 
 		// --- Dashboard ---
 		{"GET", "/api/dashboard/managements", "usp_CMS_Dashboard_Asset_AdditionalList", []param{sess()}},
 		{"POST", "/api/dashboard", "usp_CMS_Dashboard_Asset", bodyParams(true, "IDX_M_AssetManagement")},
+		{"GET", "/api/dashboard/highlight", "usp_CMS_Dashboard_Highlight", []param{sess()}},
+		{"POST", "/api/dashboard/coverage", "usp_CMS_Dashboard_OpnameCoverage", bodyParams(true, "IDX_M_AssetManagement", "From", "To")},
 
 		// --- Manage Asset (admin grid) ---
 		{"POST", "/api/assets/search", "usp_CMS_ManageAsset_Search", bodyParams(true,
@@ -125,6 +175,23 @@ func endpoints() []endpoint {
 		{"POST", "/api/assets/history/user", "usp_CMS_ManageAsset_User_By_IDXAsset", []param{gate(), b("IDX_M_Asset")}},
 		{"POST", "/api/assets/history/management", "usp_CMS_ManageAsset_Management_By_IDXAsset", []param{gate(), b("IDX_M_Asset")}},
 		{"POST", "/api/assets/history/company", "usp_CMS_ManageAsset_Company_By_IDXAsset", []param{gate(), b("IDX_M_Asset")}},
+
+		// Foto asset (foto utama/registrasi) — path disimpan di T_AssetPhoto (SQL 007).
+		{"POST", "/api/assets/photo", "usp_CMS_Asset_Photo_By_IDXAsset", []param{gate(), b("IDX_M_Asset")}},
+		{"POST", "/api/assets/photo/save", "usp_CMS_Asset_Photo_Save",
+			bodyParams(true, "IDX_M_Asset", "PhotoPath", "PhotoFileName", "PhotoSize", "PhotoWidth", "PhotoHeight")},
+
+		// --- Batching Status Asset (Upload Asset): Draft → Pending → Approve/Reject ---
+		{"POST", "/api/upload-asset/search", "usp_CMS_UploadAsset_Search", bodyParams(true, "Status", "Keyword")},
+		{"POST", "/api/upload-asset/validate", "usp_CMS_UploadAsset_Validate", bodyParams(true, "AssetList")},
+		{"POST", "/api/upload-asset/save", "usp_CMS_UploadAsset_Save",
+			bodyParams(true, "IDX_M_AssetStatus", "IDX_M_AssetManagement", "Remarks", "AssetList")},
+		{"POST", "/api/upload-asset/submit", "usp_CMS_UploadAsset_Submit", bodyParams(true, "IDX_T_UploadBatch")},
+		{"POST", "/api/upload-asset/item/remove", "usp_CMS_UploadAsset_Item_Remove", bodyParams(true, "IDX_T_UploadBatchItem")},
+		{"POST", "/api/upload-asset/item/add", "usp_CMS_UploadAsset_Item_Add", bodyParams(true, "IDX_T_UploadBatch", "AssetList")},
+		{"POST", "/api/upload-asset/detail", "usp_CMS_UploadAsset_By_IDX", []param{gate(), b("IDX_T_UploadBatch")}},
+		{"POST", "/api/upload-asset/approve", "usp_CMS_UploadAsset_Approve", bodyParams(true, "IDX_T_UploadBatch", "Reason")},
+		{"POST", "/api/upload-asset/reject", "usp_CMS_UploadAsset_Reject", bodyParams(true, "IDX_T_UploadBatch", "Reason")},
 
 		// actions
 		{"POST", "/api/assets/assign-user", "usp_CMS_ManageAsset_User_Assign", bodyParams(true, "IDX_M_Asset", "IDX_M_AssetUser", "Date", "Remarks")},
@@ -184,6 +251,15 @@ func endpoints() []endpoint {
 		{"POST", "/api/settings/users/by-nik", "usp_CMS_UserASRILup_By_NIK", bodyParams(false, "NIK")},
 		{"POST", "/api/settings/users", "usp_CMS_UserASRILup_Save", bodyParams(true, "NIK", "UserAccess")},
 		{"PATCH", "/api/settings/users", "usp_CMS_UserASRILup_Update", bodyParams(true, "NIK", "UserAccess")},
+		// Daftar Role (GroupRole) dari CORES — pakai SP existing yang dipakai ASRI Apps
+		// Management (bukan bikin baru). @IDX_M_Apps=78 = ASRILup (wajib, SP tak punya default).
+		{"GET", "/api/settings/role-list", "CORES.SecurityManagementDB.dbo.usp_ASRI_AppsManagement_User_Access_Role_List", []param{c("IDX_M_Apps", "78")}},
+		// User Setting: map user -> Role (CORES) + scope Management (lokal).
+		{"POST", "/api/settings/user-setting/search", "usp_CMS_UserSetting_Search", bodyParams(false, "Keyword")},
+		{"POST", "/api/settings/user-setting", "usp_CMS_UserSetting_Save", bodyParams(true, "NIK", "IDX_M_GroupsRole", "IDX_M_AssetManagement")},
+		{"DELETE", "/api/settings/user-setting", "usp_CMS_UserSetting_Delete", bodyParams(true, "NIK")},
+		// Picker karyawan (SEMUA karyawan HRIS aktif) untuk Assign User ke Role.
+		{"GET", "/api/settings/employee-list", "usp_CMS_UserSetting_EmployeeList", nil},
 
 		// --- Master hub ---
 		{"POST", "/api/master", "usp_CMS_AdminAsset_Load", bodyParams(true, "Keyword")},

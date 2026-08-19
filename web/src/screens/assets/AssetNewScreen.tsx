@@ -340,7 +340,7 @@ export default function AssetNewScreen() {
   if (lookupsError) {
     return (
       <>
-        <PageHeader title="Add Asset" description="Buat aset baru" />
+        <PageHeader title="Add Asset" description="Tambah data aset baru" />
         <Card className="border-0 shadow-sm">
           <CardContent className="flex flex-col items-center gap-3 p-10 text-center">
             <p className="text-sm font-medium text-foreground">Gagal memuat data pilihan</p>
@@ -360,15 +360,15 @@ export default function AssetNewScreen() {
     <form onSubmit={submit}>
       <PageHeader
         title="Add Asset"
-        description="Buat aset baru"
+        description="Tambah data aset baru"
         action={
           <div className="flex gap-2">
             <Button type="button" variant="outline" onClick={clear} disabled={submitting}>
-              <RefreshCw className="h-4 w-4" /> Cancel
+              <RefreshCw className="h-4 w-4" /> Batal
             </Button>
             <Button type="submit" disabled={submitting}>
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save
+              SAVE
             </Button>
           </div>
         }
@@ -378,6 +378,9 @@ export default function AssetNewScreen() {
         <CardContent className="grid gap-x-6 gap-y-4 p-5 lg:grid-cols-2">
           {/* Left column: Managed By, Company, User, Location, Status, Purchase Order, Remarks */}
           <div className="space-y-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Data Kepemilikan
+            </div>
             <div className="space-y-1.5">
               <Label>Managed By</Label>
               <Select
@@ -432,7 +435,10 @@ export default function AssetNewScreen() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>User</Label>
+              <Label>
+                User (Pemegang){' '}
+                <span className="text-xs font-normal text-muted-foreground">opsional</span>
+              </Label>
               <Combobox
                 id="asset-user"
                 title="Pilih User"
@@ -440,7 +446,7 @@ export default function AssetNewScreen() {
                 onChange={(v) => set('user', v)}
                 options={userOptions}
                 disabled={disabled}
-                placeholder="Pilih user"
+                placeholder="Cari nama / NIK karyawan (HRIS)…"
                 className={cn(errors.user && 'border-destructive')}
               />
               <Err msg={errors.user} />
@@ -484,13 +490,19 @@ export default function AssetNewScreen() {
               <Err msg={errors.status} />
             </div>
 
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Purchase Order
+            </div>
             <div className="space-y-1.5">
-              <Label>Purchase Order</Label>
+              <Label>
+                No. PO{' '}
+                <span className="text-xs font-normal text-muted-foreground">= PO ID</span>
+              </Label>
               <div className="grid grid-cols-[1fr_auto] gap-2">
                 <Input
                   value={form.poNo}
                   onChange={(e) => set('poNo', e.target.value)}
-                  placeholder="Purchase Order"
+                  placeholder="Cari No. PO (ASBS-Asset)…"
                 />
                 <Button
                   type="button"
@@ -511,6 +523,7 @@ export default function AssetNewScreen() {
               <Textarea
                 value={form.remarks}
                 onChange={(e) => set('remarks', e.target.value)}
+                placeholder="Catatan tambahan aset…"
                 rows={2}
                 disabled={disabled}
               />
@@ -519,6 +532,9 @@ export default function AssetNewScreen() {
 
           {/* Right column: Type, Model, Brand, Color, Size, Currency, Asset Date, Unit Price */}
           <div className="space-y-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Spesifikasi Aset
+            </div>
             <div className="space-y-1.5">
               <Label>Type</Label>
               <Select
@@ -560,7 +576,7 @@ export default function AssetNewScreen() {
                   type="button"
                   variant="outline"
                   size="icon"
-                  aria-label="New Model"
+                  aria-label="Quick Add Model"
                   onClick={() => {
                     setNewModelType(form.type)
                     setModelDialog(true)
@@ -590,7 +606,7 @@ export default function AssetNewScreen() {
                   type="button"
                   variant="outline"
                   size="icon"
-                  aria-label="New Brand"
+                  aria-label="Quick Add Brand"
                   onClick={() => setBrandDialog(true)}
                   disabled={disabled}
                 >
@@ -634,7 +650,7 @@ export default function AssetNewScreen() {
                   type="button"
                   variant="outline"
                   size="icon"
-                  aria-label="New Size"
+                  aria-label="Quick Add Size"
                   onClick={() => setSizeDialog(true)}
                   disabled={disabled}
                 >
@@ -644,6 +660,9 @@ export default function AssetNewScreen() {
               <Err msg={errors.size} />
             </div>
 
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Nilai Perolehan
+            </div>
             <div className="space-y-1.5">
               <Label>Currency</Label>
               <Select value={form.currency} onValueChange={(v) => set('currency', v)} disabled={disabled}>
@@ -698,7 +717,7 @@ export default function AssetNewScreen() {
       <Dialog open={modelDialog} onOpenChange={setModelDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>New Model</DialogTitle>
+            <DialogTitle>Quick Add Model</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
@@ -728,11 +747,11 @@ export default function AssetNewScreen() {
               disabled={quickSaving}
               onClick={() => setModelDialog(false)}
             >
-              Cancel
+              Batal
             </Button>
             <Button type="button" disabled={quickSaving} onClick={quickAddModel}>
               {quickSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-              Save
+              SAVE
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -742,7 +761,7 @@ export default function AssetNewScreen() {
       <Dialog open={brandDialog} onOpenChange={setBrandDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>New Brand</DialogTitle>
+            <DialogTitle>Quick Add Brand</DialogTitle>
           </DialogHeader>
           <div className="space-y-1.5">
             <Label>Brand</Label>
@@ -755,11 +774,11 @@ export default function AssetNewScreen() {
               disabled={quickSaving}
               onClick={() => setBrandDialog(false)}
             >
-              Cancel
+              Batal
             </Button>
             <Button type="button" disabled={quickSaving} onClick={quickAddBrand}>
               {quickSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-              Save
+              SAVE
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -769,7 +788,7 @@ export default function AssetNewScreen() {
       <Dialog open={sizeDialog} onOpenChange={setSizeDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>New Size</DialogTitle>
+            <DialogTitle>Quick Add Size</DialogTitle>
           </DialogHeader>
           <div className="space-y-1.5">
             <Label>Size</Label>
@@ -782,11 +801,11 @@ export default function AssetNewScreen() {
               disabled={quickSaving}
               onClick={() => setSizeDialog(false)}
             >
-              Cancel
+              Batal
             </Button>
             <Button type="button" disabled={quickSaving} onClick={quickAddSize}>
               {quickSaving && <Loader2 className="h-4 w-4 animate-spin" />}
-              Save
+              SAVE
             </Button>
           </DialogFooter>
         </DialogContent>

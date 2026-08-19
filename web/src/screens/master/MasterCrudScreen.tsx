@@ -12,6 +12,7 @@ import {
   PowerOff,
   ChevronLeft,
   ChevronRight,
+  Save,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -45,6 +46,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { cn } from '@/lib/utils'
 import { numberWithDots } from '@/lib/format'
 import {
   getMasterMeta,
@@ -62,6 +64,7 @@ import {
   type MasterEntityMeta,
   type MasterFormField,
 } from '@/api/master'
+import { usePermsStore, can } from '@/store/perms'
 
 // Rows shown per page in the master tables (client-side paging so long lists
 // like Location / User don't run off the bottom of the screen).
@@ -86,6 +89,13 @@ export default function MasterCrudScreen() {
 }
 
 function MasterCrud({ meta }: { meta: MasterEntityMeta }) {
+  // Action permissions (app 78 form → R/I/U/D). Gate Tambah/Ubah/Hapus/toggle so
+  // a role without the action never sees the button (BFF enforces too).
+  const perms = usePermsStore((s) => s.perms)
+  const canInsert = can(perms, meta.formIdx, 'I')
+  const canUpdate = can(perms, meta.formIdx, 'U')
+  const canDelete = can(perms, meta.formIdx, 'D')
+
   const [searchInput, setSearchInput] = useState('')
   const [keyword, setKeyword] = useState('')
 
@@ -108,6 +118,9 @@ function MasterCrud({ meta }: { meta: MasterEntityMeta }) {
   const [editing, setEditing] = useState<MasterRow | null>(null)
   const [values, setValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
+  // "Aktif setelah disimpan" toggle. Local-only for now; payload has no active
+  // flag yet. TODO: wire to the save/update API when the SP exposes it.
+  const [activeAfterSave, setActiveAfterSave] = useState(true)
   // Options for any select field (e.g. Type Model's parent Type), keyed by param.
   const [selectOptions, setSelectOptions] = useState<
     Record<string, { value: string; label: string }[]>
@@ -196,12 +209,14 @@ function MasterCrud({ meta }: { meta: MasterEntityMeta }) {
 
   function openAdd() {
     setEditing(null)
+    setActiveAfterSave(true)
     setValues(Object.fromEntries(fieldDefs.map((f) => [f.param, ''])))
     setDialogOpen(true)
   }
 
   function openEdit(row: MasterRow) {
     setEditing(row)
+    setActiveAfterSave(true)
     setValues(
       Object.fromEntries(
         fieldDefs.map((f) => {
@@ -234,10 +249,10 @@ function MasterCrud({ meta }: { meta: MasterEntityMeta }) {
     try {
       if (editing) {
         const msg = await updateMaster(meta.key, buildFields(true, editing))
-        toast.success(msg || `${meta.label} diperbarui`)
+        toast.success(msg || 'Data master diperbarui')
       } else {
         const msg = await saveMaster(meta.key, buildFields(false))
-        toast.success(msg || `${meta.label} ditambahkan`)
+        toast.success(msg || 'Data master ditambahkan')
       }
       setDialogOpen(false)
       reload()
@@ -257,7 +272,7 @@ function MasterCrud({ meta }: { meta: MasterEntityMeta }) {
       const msg = isEnabled
         ? await disableMaster(meta, idx)
         : await enableMaster(meta, idx)
-      toast.success(msg || (isEnabled ? 'Dinonaktifkan' : 'Diaktifkan'))
+      toast.success(msg || (isEnabled ? 'Data dinonaktifkan' : 'Data diaktifkan'))
       reload()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Gagal mengubah status')
@@ -275,7 +290,7 @@ function MasterCrud({ meta }: { meta: MasterEntityMeta }) {
       // Legacy calls the delete SP directly; it only succeeds on rows already
       // disabled (the user disables first via the action menu).
       const msg = await deleteMaster(meta, idx)
-      toast.success(msg || `${rowName(meta, deleteTarget)} dihapus`)
+      toast.success(msg || 'Data master dihapus')
       setDeleteTarget(null)
       reload()
     } catch (err) {
@@ -287,11 +302,10 @@ function MasterCrud({ meta }: { meta: MasterEntityMeta }) {
 
   const hasCode = !!meta.codeKey
   const showCount = !meta.hideCount
-  const colSpan = 1 + (hasCode ? 1 : 0) + (showCount ? 1 : 0) + 1 // [code], name, [count], setting
-  // Entity-specific column headers to mirror the legacy masters
-  // (e.g. "Asset Brand Name" / "Asset Brand Count"). User is the exception.
-  const nameHeader = meta.key === 'user' ? 'Name' : `${meta.label} Name`
-  const countHeader = `${meta.label} Count`
+  const colSpan = 1 + (hasCode ? 1 : 0) + (showCount ? 1 : 0) + 1 + 1 // [code], name, [count], status, aksi
+  // Column headers per the mockup (Name / Jml Asset).
+  const nameHeader = 'Name'
+  const countHeader = 'Jml Asset'
   // Short entity name for dialog titles: "Asset Brand" -> "Brand".
   const shortName = meta.label.replace(/^Asset\s+/, '')
 
@@ -299,7 +313,12 @@ function MasterCrud({ meta }: { meta: MasterEntityMeta }) {
     <>
       <PageHeader
         title={meta.label}
-        description={loading ? 'Memuat…' : `${numberWithDots(data.length)} item`}
+        description={
+          <>
+            CRUD data referensi. Aturan:{' '}
+            <b>delete hanya bila status Disabled dan jumlah asset = 0</b>.
+          </>
+        }
         action={
           <div className="flex gap-2">
             <Button asChild variant="outline">
@@ -307,9 +326,9 @@ function MasterCrud({ meta }: { meta: MasterEntityMeta }) {
                 <ArrowLeft className="h-4 w-4" /> Master
               </Link>
             </Button>
-            {meta.editable && (
+            {meta.editable && canInsert && (
               <Button onClick={openAdd}>
-                <Plus className="h-4 w-4" /> Tambah
+                <Plus className="h-4 w-4" /> Tambah {shortName}
               </Button>
             )}
           </div>
@@ -321,7 +340,7 @@ function MasterCrud({ meta }: { meta: MasterEntityMeta }) {
         <Input
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
-          placeholder={`Search ${shortName}`}
+          placeholder="Cari data master…"
           className="pl-9"
         />
       </div>
@@ -347,7 +366,8 @@ function MasterCrud({ meta }: { meta: MasterEntityMeta }) {
                 {hasCode && <TableHead className="w-32">{meta.codeLabel}</TableHead>}
                 <TableHead>{nameHeader}</TableHead>
                 {showCount && <TableHead className="text-right">{countHeader}</TableHead>}
-                <TableHead className="w-32 text-right">Setting</TableHead>
+                <TableHead className="w-28 text-center">Status</TableHead>
+                <TableHead className="w-32 text-right">Aksi</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -390,11 +410,6 @@ function MasterCrud({ meta }: { meta: MasterEntityMeta }) {
                               {rowCode(meta, r)}
                             </span>
                           )}
-                          {!enabled && (
-                            <Badge variant="secondary" className="text-[10px]">
-                              Nonaktif
-                            </Badge>
-                          )}
                         </div>
                       </TableCell>
                       {showCount && (
@@ -402,9 +417,22 @@ function MasterCrud({ meta }: { meta: MasterEntityMeta }) {
                           {numberWithDots(rowCount(meta, r))}
                         </TableCell>
                       )}
-                      <TableCell aria-label="Setting">
+                      {/* Status: Active / Disabled (mockup badge-ok / badge-inactive) */}
+                      <TableCell className="text-center">
+                        <Badge
+                          variant="outline"
+                          className={
+                            enabled
+                              ? 'border-emerald-200 bg-emerald-50 text-[11px] font-medium text-emerald-700'
+                              : 'bg-muted text-[11px] font-medium text-muted-foreground'
+                          }
+                        >
+                          {enabled ? 'Active' : 'Disabled'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell aria-label="Aksi">
                         <div className="flex justify-end gap-1">
-                          {meta.editable && r.isUpdate === 1 && (
+                          {meta.editable && r.isUpdate === 1 && canUpdate && (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -416,7 +444,7 @@ function MasterCrud({ meta }: { meta: MasterEntityMeta }) {
                               <Pencil className="h-4 w-4" />
                             </Button>
                           )}
-                          {(r.isDisable === 1 || r.isEnable === 1) && (
+                          {(r.isDisable === 1 || r.isEnable === 1) && canUpdate && (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -437,7 +465,7 @@ function MasterCrud({ meta }: { meta: MasterEntityMeta }) {
                           {/* Legacy cs-action-menu: delete shows only when the
                               row's isDelete flag is set AND it is not currently
                               disable-able (i.e. already disabled). Group never. */}
-                          {!meta.noDelete && r.isDelete === 1 && r.isDisable !== 1 && (
+                          {!meta.noDelete && r.isDelete === 1 && r.isDisable !== 1 && canDelete && (
                             <Button
                               variant="ghost"
                               size="icon"
@@ -498,43 +526,75 @@ function MasterCrud({ meta }: { meta: MasterEntityMeta }) {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>
-              {editing ? `Edit Detail ${shortName}` : `Add ${shortName}`}
-            </DialogTitle>
-            {editing && (
-              <DialogDescription>{rowName(meta, editing) || '-'}</DialogDescription>
-            )}
+            <div className="flex items-start gap-3">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+                {editing ? (
+                  <Pencil className="h-[18px] w-[18px]" />
+                ) : (
+                  <Plus className="h-[18px] w-[18px]" />
+                )}
+              </span>
+              <div className="space-y-1">
+                <DialogTitle>
+                  {editing ? 'Ubah Data Master' : 'Tambah Data Master'}
+                </DialogTitle>
+                <DialogDescription>
+                  {editing ? rowName(meta, editing) || '-' : `Master ${shortName}`}
+                </DialogDescription>
+              </div>
+            </div>
           </DialogHeader>
           <form onSubmit={save} className="space-y-4">
-            {fieldDefs.map((f, i) => (
-              <div key={f.param} className="space-y-1.5">
-                <Label htmlFor={`field-${f.param}`}>{f.label}</Label>
-                {f.control === 'select' ? (
-                  <Select
-                    value={values[f.param] ?? ''}
-                    onValueChange={(v) => setValues((s) => ({ ...s, [f.param]: v }))}
-                  >
-                    <SelectTrigger id={`field-${f.param}`}>
-                      <SelectValue placeholder={`Pilih ${f.label}`} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(selectOptions[f.param] ?? []).map((o) => (
-                        <SelectItem key={o.value} value={o.value}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Input
-                    id={`field-${f.param}`}
-                    value={values[f.param] ?? ''}
-                    onChange={(e) => setValues((s) => ({ ...s, [f.param]: e.target.value }))}
-                    autoFocus={i === 0}
-                  />
-                )}
-              </div>
-            ))}
+            {fieldDefs.map((f, i) => {
+              // Placeholders per mockup: first field = code (mono), second = name.
+              const placeholder =
+                i === 0 ? 'mis. LOC-021' : i === 1 ? 'mis. 4F · Meeting Room' : undefined
+              return (
+                <div key={f.param} className="space-y-1.5">
+                  <Label htmlFor={`field-${f.param}`}>
+                    {f.label}
+                    {!f.optional && <span className="ml-0.5 text-destructive">*</span>}
+                  </Label>
+                  {f.control === 'select' ? (
+                    <Select
+                      value={values[f.param] ?? ''}
+                      onValueChange={(v) => setValues((s) => ({ ...s, [f.param]: v }))}
+                    >
+                      <SelectTrigger id={`field-${f.param}`}>
+                        <SelectValue placeholder={`Pilih ${f.label}`} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(selectOptions[f.param] ?? []).map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      id={`field-${f.param}`}
+                      value={values[f.param] ?? ''}
+                      onChange={(e) => setValues((s) => ({ ...s, [f.param]: e.target.value }))}
+                      placeholder={placeholder}
+                      className={cn(i === 0 && 'font-mono')}
+                      autoFocus={i === 0}
+                    />
+                  )}
+                </div>
+              )
+            })}
+            {/* "Aktif setelah disimpan" — local-only for now (payload has no active
+                flag). TODO: wire to save/update API when the SP exposes it. */}
+            <label className="flex items-center gap-2 text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={activeAfterSave}
+                onChange={(e) => setActiveAfterSave(e.target.checked)}
+                className="h-4 w-4 rounded border-input text-primary accent-primary"
+              />
+              Aktif setelah disimpan
+            </label>
             <DialogFooter>
               <DialogClose asChild>
                 <Button type="button" variant="outline" disabled={saving}>
@@ -542,7 +602,11 @@ function MasterCrud({ meta }: { meta: MasterEntityMeta }) {
                 </Button>
               </DialogClose>
               <Button type="submit" disabled={saving}>
-                {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
                 Simpan
               </Button>
             </DialogFooter>
